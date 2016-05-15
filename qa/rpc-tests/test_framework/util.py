@@ -389,7 +389,7 @@ def interconnect_nodes(nodes):
       for to in nodes:
         if frm == to: continue
         up = urlparse.urlparse(to.url)
-        ip_port = up.hostname + ":" + str(up.port-1000)  # this is the RPC port but we want the p2p port so -1000
+        ip_port = up.hostname + ":" + str(up.port - PORT_RANGE)  # this is the RPC port but we want the p2p port so -1000
         frm.addnode(ip_port, "onetry")
 
 def find_output(node, txid, amount):
