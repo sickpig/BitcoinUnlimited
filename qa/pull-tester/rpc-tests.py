@@ -30,7 +30,16 @@ import subprocess
 import tempfile
 import re
 
+sys.path.append("qa/pull-tester/")
 from tests_config import *
+
+BOLD = ("","")
+if os.name == 'posix':
+    # primitive formatting on supported
+    # terminal via ANSI escape sequences:
+    BOLD = ('\033[0m', '\033[1m')
+
+RPC_TESTS_DIR = SRCDIR + '/qa/rpc-tests/'
 
 #If imported values are not defined then set to zero (or disabled)
 if not vars().has_key('ENABLE_WALLET'):
