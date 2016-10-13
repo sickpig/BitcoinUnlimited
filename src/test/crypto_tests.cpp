@@ -5,13 +5,16 @@
 
 #include "crypto/aes.h"
 #include "crypto/hmac_sha256.h"
+#include "crypto/hmac_sha256.h"
+#include "crypto/hmac_sha512.h"
 #include "crypto/hmac_sha512.h"
 #include "crypto/ripemd160.h"
 #include "crypto/sha1.h"
 #include "crypto/sha256.h"
 #include "crypto/sha512.h"
-#include "random.h"
 #include "test/test_bitcoin.h"
+#include "test_random.h"
+#include "utilstrencodings.h"
 #include "utilstrencodings.h"
 
 #include <vector>

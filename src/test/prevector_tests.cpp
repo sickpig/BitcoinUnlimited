@@ -4,8 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include "prevector.h"
-#include "random.h"
-#include <vector>
+#include "test_random.h"
 
 #include "serialize.h"
 #include "streams.h"
@@ -26,6 +25,8 @@ class prevector_tester
     pretype pre_vector;
 
     typedef typename pretype::size_type Size;
+    bool passed = true;
+    FastRandomContext rand_cache;
 
     void test()
     {
@@ -173,6 +174,22 @@ public:
     {
         pre_vector.shrink_to_fit();
         test();
+    }
+
+    void swap()
+    {
+        real_vector.swap(real_vector_alt);
+        pre_vector.swap(pre_vector_alt);
+        test();
+    }
+    ~prevector_tester()
+    {
+        BOOST_CHECK_MESSAGE(passed, "insecure_rand_Rz: " << rand_cache.Rz << ", insecure_rand_Rw: " << rand_cache.Rw);
+    }
+    prevector_tester()
+    {
+        seed_insecure_rand();
+        rand_cache = insecure_rand_ctx;
     }
 };
 

@@ -26,10 +26,10 @@ int GetRandInt(int nMax);
 uint256 GetRandHash();
 
 /**
- * Seed insecure_rand using the random pool.
- * @param Deterministic Use a deterministic seed
+ * Function to gather random data from multiple sources, failing whenever any
+ * of those source fail to provide a result.
  */
-void seed_insecure_rand(bool fDeterministic = false);
+void GetStrongRandBytes(unsigned char *buf, int num);
 
 /**
  * Fast randomness source. This is seeded once with secure random data, but
@@ -38,21 +38,8 @@ void seed_insecure_rand(bool fDeterministic = false);
  */
 class FastRandomContext
 {
-private:
-    uint64_t bitbuf;
-    int bitbuf_size;
-
-    void FillBitBuffer()
-    {
-        bitbuf = rand64();
-        bitbuf_size = 64;
-    }
-
 public:
     explicit FastRandomContext(bool fDeterministic = false);
-
-    uint32_t Rz;
-    uint32_t Rw;
 
     uint32_t rand32()
     {
@@ -61,59 +48,8 @@ public:
         return (Rw << 16) + Rz;
     }
 
-    uint64_t rand64()
-    {
-        uint64_t a = rand32();
-        uint64_t b = rand32();
-        return (b << 32) + a;
-    }
-
-    bool randbool() { return rand32() & 1; }
-    uint64_t randbits(int bits)
-    {
-        if (bits == 0)
-        {
-            return 0;
-        }
-        else if (bits > 32)
-        {
-            return rand64() >> (64 - bits);
-        }
-        else
-        {
-            if (bitbuf_size < bits)
-                FillBitBuffer();
-
-            uint64_t ret = bitbuf & (~uint64_t(0) >> (64 - bits));
-            bitbuf >>= bits;
-            bitbuf_size -= bits;
-            return ret;
-        }
-    }
+    uint32_t Rz;
+    uint32_t Rw;
 };
-
-/* Number of random bytes returned by GetOSRand.
- * When changing this constant make sure to change all call sites, and make
- * sure that the underlying OS APIs for all platforms support the number.
- * (many cap out at 256 bytes).
- */
-static const ssize_t NUM_OS_RANDOM_BYTES = 32;
-
-/** Get 32 bytes of system entropy. Do not use this in application code: use
- * GetStrongRandBytes instead.
- */
-void GetOSRand(unsigned char *ent32);
-
-/** Check that OS randomness is available and returning the requested number
- * of bytes.
- */
-extern uint32_t insecure_rand_Rz;
-extern uint32_t insecure_rand_Rw;
-static inline uint32_t insecure_rand(void)
-{
-    insecure_rand_Rz = 36969 * (insecure_rand_Rz & 65535) + (insecure_rand_Rz >> 16);
-    insecure_rand_Rw = 18000 * (insecure_rand_Rw & 65535) + (insecure_rand_Rw >> 16);
-    return (insecure_rand_Rw << 16) + insecure_rand_Rz;
-}
 
 #endif // BITCOIN_RANDOM_H
