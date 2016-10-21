@@ -405,6 +405,7 @@ bool MarkBlockAsReceived(const uint256& hash) {
             MAX_BLOCKS_IN_TRANSIT_PER_PEER = 1;
             BLOCK_DOWNLOAD_WINDOW = 8;
         }
+
         LogPrint("thin", "Received block %s in %.2f seconds\n", hash.ToString(), nResponseTime);
         LogPrint("thin", "Average block response time is %.2f seconds\n", avgResponseTime);
         LogPrintf("BLOCK_DOWNLOAD_WINDOW is %d MAX_BLOCKS_IN_TRANSIT_PER_PEER is %d\n", BLOCK_DOWNLOAD_WINDOW, MAX_BLOCKS_IN_TRANSIT_PER_PEER);
@@ -688,7 +689,13 @@ CBlockTreeDB *pblocktree = NULL;
 //
 // mapOrphanTransactions
 //
-
+static bool AlreadyHaveOrphan(uint256 hash)
+{
+    LOCK(cs_orphancache);
+    if (mapOrphanTransactions.count(hash))
+        return true;
+    return false;
+}
 bool AddOrphanTx(const CTransaction& tx, NodeId peer) EXCLUSIVE_LOCKS_REQUIRED(cs_orphancache)
 {
 
@@ -711,12 +718,12 @@ bool AddOrphanTx(const CTransaction& tx, NodeId peer) EXCLUSIVE_LOCKS_REQUIRED(c
     //      orphan cache is limited to only 5000 entries by default. Only 500MB of memory could be consumed
     //      if there were some kind of orphan memory exhaustion attack.
     //      Dropping any tx means they need to be included in the thin block when it it mined, which is inefficient.
-    //unsigned int sz = tx.GetSerializeSize(SER_NETWORK, CTransaction::CURRENT_VERSION);
-    //if (sz > 5000)
-    //{
-    //    LogPrint("mempool", "ignoring large orphan tx (size: %u, hash: %s)\n", sz, hash.ToString());
-    //    return false;
-    //}
+    unsigned int sz = tx.GetSerializeSize(SER_NETWORK, CTransaction::CURRENT_VERSION);
+    if (sz > MAX_STANDARD_TX_SIZE)
+    {
+        LogPrint("mempool", "ignoring large orphan tx (size: %u, hash: %s)\n", sz, hash.ToString());
+        return false;
+    }
     // BU - Xtreme Thinblocks - end section
 
     mapOrphanTransactions[hash].tx = tx;
@@ -3668,10 +3675,10 @@ static bool AcceptBlockHeader(const CBlockHeader& block, CValidationState& state
         CBlockIndex* pindexPrev = NULL;
         BlockMap::iterator mi = mapBlockIndex.find(block.hashPrevBlock);
         if (mi == mapBlockIndex.end())
-            return state.DoS(10, error("%s: prev block not found", __func__), 0, "bad-prevblk");
+	  return state.DoS(10, error("%s: previous block %s not found while accepting %s", __func__,block.hashPrevBlock.ToString(),hash.ToString()), 0, "bad-prevblk");
         pindexPrev = (*mi).second;
         if (pindexPrev->nStatus & BLOCK_FAILED_MASK)
-            return state.DoS(100, error("%s: prev block invalid", __func__), REJECT_INVALID, "bad-prevblk");
+            return state.DoS(100, error("%s: previous block invalid", __func__), REJECT_INVALID, "bad-prevblk");
 
         assert(pindexPrev);
         if (fCheckpointsEnabled && !CheckIndexAgainstCheckpoint(pindexPrev, state, chainparams, hash))
@@ -3800,7 +3807,10 @@ bool ProcessNewBlock(CValidationState& state, const CChainParams& chainparams, c
         }
         CheckBlockIndex(chainparams.GetConsensus());
         if (!ret)
+	  {
+            // BU TODO: if block comes out of order (before its parent) this will happen.  We should cache the block until the parents arrive.
             return error("%s: AcceptBlock FAILED", __func__);
+	  }
     }
 
     if (!ActivateBestChain(state, chainparams, pblock))
@@ -4207,15 +4217,18 @@ bool CVerifyDB::VerifyDB(const CChainParams& chainparams, CCoinsView *coinsview,
 
 void UnloadBlockIndex()
 {
-    //LOCK(cs_main);
-    LOCK2(cs_main, cs_orphancache);
+    {
+    LOCK(cs_orphancache);
+    mapOrphanTransactions.clear();
+    mapOrphanTransactionsByPrev.clear();
+    }
+
+    LOCK(cs_main);
     setBlockIndexCandidates.clear();
     chainActive.SetTip(NULL);
     pindexBestInvalid = NULL;
     pindexBestHeader = NULL;
     mempool.clear();
-    mapOrphanTransactions.clear();
-    mapOrphanTransactionsByPrev.clear();
     nSyncStarted = 0;
     mapBlocksUnlinked.clear();
     vinfoBlockFile.clear();
@@ -4674,10 +4687,9 @@ static bool AlreadyHave(const CInv& inv) EXCLUSIVE_LOCKS_REQUIRED(cs_main)
                 hashRecentRejectsChainTip = chainActive.Tip()->GetBlockHash();
                 recentRejects->reset();
             }
-            LOCK(cs_orphancache);
             return recentRejects->contains(inv.hash) ||
                    mempool.exists(inv.hash) ||
-                   mapOrphanTransactions.count(inv.hash) ||
+                   AlreadyHaveOrphan(inv.hash) ||
                    pcoinsTip->HaveCoins(inv.hash);
         }
     case MSG_BLOCK:
@@ -5336,6 +5348,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
         // Check for recently rejected (and do other quick existence checks)
         if (!AlreadyHave(inv) && AcceptToMemoryPool(mempool, state, tx, true, &fMissingInputs))
         {
+
             mempool.check(pcoinsTip);
             RelayTransaction(tx);
             vWorkQueue.push_back(inv.hash);
@@ -5396,7 +5409,6 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
                     mempool.check(pcoinsTip);
                 }
             }
-            
             BOOST_FOREACH(uint256 hash, vEraseQueue)
                 EraseOrphanTx(hash);
 

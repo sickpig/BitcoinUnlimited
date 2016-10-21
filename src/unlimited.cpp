@@ -26,6 +26,7 @@
 #include "validationinterface.h"
 #include "version.h"
 #include "stat.h"
+#include "tweak.h"
 
 #include <boost/foreach.hpp>
 #include <boost/lexical_cast.hpp>
@@ -68,6 +69,7 @@ boost::posix_time::milliseconds statMinInterval(10000);
 boost::asio::io_service stat_io_service __attribute__((init_priority(101)));
 
 CStatMap statistics __attribute__((init_priority(102)));
+CTweakMap tweaks __attribute__((init_priority(102)));
 
 vector<CNode*> vNodes __attribute__((init_priority(109)));
 CCriticalSection cs_vNodes __attribute__((init_priority(109)));
@@ -77,6 +79,70 @@ CSemaphore*  semOutboundAddNode = NULL; // BU: separate semaphore for -addnodes
 CNodeSignals g_signals __attribute__((init_priority(109)));
 CNetCleanup cnet_instance_cleanup __attribute__((init_priority(110)));  // Must construct after statistics, because CNodes use statistics.  In particular, seg fault on osx during exit because constructor/destructor order is not guaranteed between modules in clang.
 
+std::string ExcessiveBlockValidator(const unsigned int& value,unsigned int* item,bool validate)
+{
+  if (validate)
+    {
+      if (value < maxGeneratedBlock) 
+	{
+        std::ostringstream ret;
+        ret << "Sorry, your maximum mined block (" << maxGeneratedBlock << ") is larger than your proposed excessive size (" << value << ").  This would cause you to orphan your own blocks.";    
+        return ret.str();
+	}
+    }
+  else  // Do anything to "take" the new value
+    {
+      // nothing needed
+    }
+  return std::string();
+}
+
+std::string OutboundConnectionValidator(const int& value,int* item,bool validate)
+{
+  if (validate)
+    {
+      if ((value < 0)||(value > 10000))  // sanity check
+	{
+        return "Invalid Value";
+	}
+      if (value < *item)
+	{
+	  return "This field cannot be reduced at run time since that would kick out existing connections";
+	}
+    }
+  else  // Do anything to "take" the new value
+    {
+      if (value < *item)  // note that now value is the old value and *item has been set to the new.
+        {
+	  int diff = *item - value;
+          if (semOutboundAddNode)  // Add the additional slots to the outbound semaphore
+            for (int i=0; i<diff; i++)
+              semOutboundAddNode->post();
+	}
+    }
+  return std::string();
+}
+
+CTweakRef<unsigned int> ebTweak("net.excessiveBlock","Excessive block size in bytes", &excessiveBlockSize,&ExcessiveBlockValidator);
+CTweakRef<unsigned int> eadTweak("net.excessiveAcceptDepth","Excessive block chain acceptance depth in blocks", &excessiveAcceptDepth);
+CTweakRef<int> maxOutConnectionsTweak("net.maxOutboundConnections","Maximum number of outbound connections", &nMaxOutConnections,&OutboundConnectionValidator);
+CTweakRef<int> maxConnectionsTweak("net.maxConnections","Maximum number of connections connections",&nMaxConnections);
+CTweakRef<unsigned int> triTweak("net.txRetryInterval","How long to wait in microseconds before requesting a transaction from another source", &MIN_TX_REQUEST_RETRY_INTERVAL);  // When should I request a tx from someone else (in microseconds). cmdline/bitcoin.conf: -txretryinterval
+CTweakRef<unsigned int> briTweak("net.blockRetryInterval","How long to wait in microseconds before requesting a block from another source", &MIN_BLK_REQUEST_RETRY_INTERVAL); // When should I request a block from someone else (in microseconds). cmdline/bitcoin.conf: -blkretryinterval
+
+std::string SubverValidator(const std::string& value,std::string* item,bool validate)
+{
+  if (validate)
+    {
+    if (value.size() > MAX_SUBVERSION_LENGTH) 
+    {
+      return(std::string("Subversion string is too long")); 
+    }
+  }
+  return std::string();
+}
+
+CTweakRef<std::string> subverOverrideTweak("net.subversionOveride","If set, this field will override the normal subversion field.  This is useful if you need to hide your node.",&subverOverride,&SubverValidator);
 
 CStatHistory<unsigned int, MinValMax<unsigned int> > txAdded; //"memPool/txAdded");
 CStatHistory<uint64_t, MinValMax<uint64_t> > poolSize; // "memPool/size",STAT_OP_AVE);
@@ -117,8 +183,9 @@ int32_t UnlimitedComputeBlockVersion(const CBlockIndex* pindexPrev, const Consen
     
     int32_t nVersion = ComputeBlockVersion(pindexPrev, params);
 
-    if (nTime <= params.SizeForkExpiration())
-	  nVersion |= FORK_BIT_2MB;
+    // turn BIP109 off by default by commenting this out: 
+    // if (nTime <= params.SizeForkExpiration())
+    //	  nVersion |= FORK_BIT_2MB;
  
     return nVersion;
 }
@@ -558,6 +625,8 @@ void UnlimitedSetup(void)
     blockVersion = GetArg("-blockversion", blockVersion);
     excessiveBlockSize = GetArg("-excessiveblocksize", excessiveBlockSize);
     excessiveAcceptDepth = GetArg("-excessiveacceptdepth", excessiveAcceptDepth);
+    LoadTweaks();  // The above options are deprecated so the same parameter defined as a tweak will override them
+
     settingsToUserAgentString();
     //  Init network shapers
     int64_t rb = GetArg("-receiveburst", DEFAULT_MAX_RECV_BURST);
@@ -747,13 +816,22 @@ UniValue setexcessiveblock(const UniValue& params, bool fHelp)
             "\nExamples:\n" +
             HelpExampleCli("getexcessiveblock", "") + HelpExampleRpc("getexcessiveblock", ""));
 
+    unsigned int ebs=0;
     if (params[0].isNum())
-        excessiveBlockSize = params[0].get_int64();
+        ebs = params[0].get_int64();
     else {
         string temp = params[0].get_str();
         if (temp[0] == '-') boost::throw_exception( boost::bad_lexical_cast() );
-        excessiveBlockSize = boost::lexical_cast<unsigned int>(temp);
+        ebs = boost::lexical_cast<unsigned int>(temp);
     }
+
+    if (ebs < maxGeneratedBlock) 
+      {
+      std::ostringstream ret;
+      ret << "Sorry, your maximum mined block (" << maxGeneratedBlock << ") is larger than your proposed excessive size (" << ebs << ").  This would cause you to orphan your own blocks.";    
+      throw runtime_error(ret.str());
+      }
+    excessiveBlockSize = ebs;
 
     if (params[1].isNum())
         excessiveAcceptDepth = params[1].get_int64();
@@ -764,7 +842,9 @@ UniValue setexcessiveblock(const UniValue& params, bool fHelp)
     }
 
     settingsToUserAgentString();
-    return NullUniValue;
+    std::ostringstream ret;
+    ret << "Excessive Block set to " << excessiveBlockSize << " bytes.  Accept Depth set to " << excessiveAcceptDepth << " blocks.";    
+    return UniValue(ret.str());
 }
 
 
@@ -806,8 +886,8 @@ UniValue setminingmaxblock(const UniValue& params, bool fHelp)
     }
 
     // I don't want to waste time testing edge conditions where no txns can fit in a block, so limit the minimum block size
-    if (arg < 100000)
-        throw runtime_error("max generated block size must be greater than 100KB");
+    if (arg < 1000)
+        throw runtime_error("max generated block size must be greater than 1KB");
 
     maxGeneratedBlock = arg;
 
