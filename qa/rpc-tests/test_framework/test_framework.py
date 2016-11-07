@@ -168,8 +168,7 @@ class BitcoinTestFramework(object):
 
         success = False
         try:
-            if not os.path.isdir(self.options.tmpdir):
-                os.makedirs(self.options.tmpdir)
+            os.makedirs(self.options.tmpdir, exist_ok=False)
 
             # Not pretty but, I changed the function signature
             # of setup_chain to allow customization of the setup.
@@ -180,11 +179,8 @@ class BitcoinTestFramework(object):
               self.setup_chain(bitcoinConfDict, wallets)
 
             self.setup_network()
-
             self.run_test()
-
             success = True
-
         except JSONRPCException as e:
             print("JSONRPC error: "+e.error['message'])
             traceback.print_tb(sys.exc_info()[2])
