@@ -193,7 +193,7 @@ public:
         unsigned int nInIn,
         const CAmount &amount,
         unsigned int flags = SCRIPT_ENABLE_SIGHASH_FORKID)
-        : TransactionSignatureChecker(&txTo, nInIn, amount, flags), txTo(*txToIn)
+        : TransactionSignatureChecker(&txTo, nInIn, amountIn, flags), txTo(*txToIn)
     {
     }
 };
