@@ -178,6 +178,7 @@ CTweakRef<std::string> subverOverrideTweak("net.subversionOverride","If set, thi
 
 CTweak<unsigned int> maxCoinSelSearchTime("wallet.coinSelSearchTime", "When sending, how long should this wallet search for a no-change payment solution in milliseconds.  A no-change solution reduces transaction fees.", 2000);
 CTweak<unsigned int> preferredNumUTXO("wallet.preferredNumUTXO", "How many UTXOs should be maintained in this wallet (on average).  If the number of UTXOs exceeds this value, transactions will be found that tend to have more inputs.  This will consolidate UTXOs.",5000);
+CTweak<CAmount> maxTxFee("wallet.maxTxFee","Maximum total fees to use in a single wallet transaction or raw transaction; setting this too low may abort large transactions.",DEFAULT_TRANSACTION_MAXFEE);
 
 /** Number of blocks that can be requested at any given time from a single peer. */
 CTweak<unsigned int> maxBlocksInTransitPerPeer("net.maxBlocksInTransitPerPeer","Number of blocks that can be requested at any given time from a single peer. 0 means use algorithm.",0);

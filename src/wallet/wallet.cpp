@@ -2579,8 +2579,8 @@ CAmount CWallet::GetMinimumFee(unsigned int nTxBytes, unsigned int nConfirmTarge
     // LogPrintf("GetRequiredFee %lld\n",GetRequiredFee(nTxBytes));
     nFeeNeeded = std::max(nFeeNeeded, GetRequiredFee(nTxBytes));
     // But always obey the maximum
-    if (nFeeNeeded > maxTxFee)
-        nFeeNeeded = maxTxFee;
+    if (nFeeNeeded > maxTxFee.value)
+        nFeeNeeded = maxTxFee.value;
     return nFeeNeeded;
 }
 
@@ -3468,8 +3468,8 @@ bool CWallet::ParameterInteraction()
             return UIError(AmountErrMsg("maxtxfee", mapArgs["-maxtxfee"]));
         if (nMaxFee > HIGH_TX_FEE_PER_KB)
             UIWarning(_("-maxtxfee is set very high! Fees this large could be paid on a single transaction."));
-        maxTxFee = nMaxFee;
-        if (CFeeRate(maxTxFee, 1000) < ::minRelayTxFee)
+        maxTxFee.value = nMaxFee;
+        if (CFeeRate(maxTxFee.value, 1000) < ::minRelayTxFee)
         {
             return UIError(strprintf(_("Invalid amount for -maxtxfee=<amount>: '%s' (must be at least the minrelay fee of %s to prevent stuck transactions)"),
                                        mapArgs["-maxtxfee"], ::minRelayTxFee.ToString()));
