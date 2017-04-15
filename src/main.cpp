@@ -111,6 +111,9 @@ extern CTweak<unsigned int> maxBlocksInTransitPerPeer;  // override the above
 extern CTweak<unsigned int> blockDownloadWindow;
 extern CTweak<uint64_t> reindexTypicalBlockSize;
 
+extern std::map<CNetAddr, ConnectionHistory> mapInboundConnectionTracker;
+extern CCriticalSection cs_mapInboundConnectionTracker;
+
 
 /**
  * Returns true if there are nRequired or more blocks of minVersion or above
@@ -5254,7 +5257,8 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
             pfrom->PushMessage(NetMsgType::REJECT, strCommand, REJECT_DUPLICATE, std::string("Duplicate version message"));
             LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 100);
-            return error("Duplicate version message received - banning peer=%d", pfrom->GetId());
+            return error("Duplicate version message received - banning peer=%d version=%s ip=%s", pfrom->GetId(),
+                pfrom->cleanSubVer, pfrom->addrName.c_str());
         }
 
         int64_t nTime;
@@ -5272,7 +5276,8 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
                                strprintf("Protocol Version must be %d or greater", MIN_PEER_PROTO_VERSION));
             LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 100);
-            return error("Using obsolete protocol version %i - banning peer=%d", pfrom->nVersion, pfrom->id);
+            return error("Using obsolete protocol version %i - banning peer=%d version=%s ip=%s", pfrom->nVersion,
+                pfrom->GetId(), pfrom->cleanSubVer, pfrom->addrName.c_str());
         }
 
         if (pfrom->nVersion == 10300)
@@ -5352,7 +5357,7 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
             }
         }
 
-        string remoteAddr;
+        std::string remoteAddr;
         if (fLogIPs)
             remoteAddr = ", peeraddr=" + pfrom->addr.ToString();
 
@@ -5367,24 +5372,41 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
     }
 
 
+    else if (pfrom->nVersion == 0)
+    {
+        // Must have version message before anything else (Although we may send our VERSION before
+        // we receive theirs, it would not be possible to receive their VERACK before their VERSION).
+        // NOTE:  we MUST explicitly ban the peer here.  If we only indicate a misbehaviour then the peer
+        //        may never be banned since the banning process requires that messages be sent back. If an
+        //        attacker sends us messages that do not require a response coupled with an nVersion of zero
+        //        then they can continue unimpeded even though they have exceeded the misbehaving threshold.
+        pfrom->fDisconnect = true;
+        CNode::Ban(pfrom->addr, BanReasonNodeMisbehaving);
+        return error("VERSION was not received before other messages - banning peer=%d ip=%s",
+            pfrom->GetId(), pfrom->addrName.c_str());
+    }
+
+
     else if (strCommand == NetMsgType::VERACK)
     {
-        // If we never sent a VERSION message then we should not get a VERACK message.
-        if (!pfrom->fVersionSent)
+        // If we haven't sent a VERSION message yet then we should not get a VERACK message.
+        if (pfrom->tVersionSent < 0)
         {
             LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 100);
-            return error("VERACK received but we never sent a VERSION message - banning peer=%d", pfrom->GetId());
+            return error("VERACK received but we never sent a VERSION message - banning peer=%d version=%s ip=%s",
+                pfrom->GetId(), pfrom->cleanSubVer, pfrom->addrName.c_str());
         }
         if (pfrom->fSuccessfullyConnected)
         {
             LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 100);
-            return error("duplicate VERACK received - banning peer=%d", pfrom->GetId());
+            return error("duplicate VERACK received - banning peer=%d version=%s ip=%s", pfrom->GetId(),
+                pfrom->cleanSubVer, pfrom->addrName.c_str());
         }
 
-        pfrom->SetRecvVersion(std::min(pfrom->nVersion, PROTOCOL_VERSION));
         pfrom->fSuccessfullyConnected = true;
+        pfrom->SetRecvVersion(std::min(pfrom->nVersion, PROTOCOL_VERSION));
 
         // Mark this node as currently connected, so we update its timestamp later.
         if (pfrom->fNetworkNode) {
@@ -5412,6 +5434,27 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
             pfrom->PushMessage(NetMsgType::BUVERSION, GetListenPort());
             pfrom->fBUVersionSent = true;
         }
+    }
+
+
+    else if (!pfrom->fSuccessfullyConnected && GetTime() - pfrom->tVersionSent > VERACK_TIMEOUT &&
+             pfrom->tVersionSent >= 0)
+    {
+        // If verack is not received within timeout then disconnect.
+        // The peer may be slow so disconnect them only, to give them another chance if they try to re-connect.
+        // If they are a bad peer and keep trying to reconnect and still do not VERACK, they will eventually
+        // get banned by the connection slot algorithm which tracks disconnects and reconnects.
+        pfrom->fDisconnect = true;
+        LogPrint("net", "ERROR: disconnecting - VERACK not received within %d seconds for peer=%d version=%s ip=%s\n",
+            VERACK_TIMEOUT, pfrom->GetId(), pfrom->cleanSubVer, pfrom->addrName.c_str());
+
+        // update connection tracker which is used by the connection slot algorithm.
+        LOCK(cs_mapInboundConnectionTracker);
+        CNetAddr ipAddress = (CNetAddr)pfrom->addr;
+        mapInboundConnectionTracker[ipAddress].nEvictions += 1;
+        mapInboundConnectionTracker[ipAddress].nLastEvictionTime = GetTime();
+
+        return true; // return true so we don't get any process message failures in the log.
     }
 
 
@@ -6030,7 +6073,8 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
         {
             LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 100);
-            return error("BUVERSION received but we never sent a VERACK message - banning peer=%d", pfrom->GetId());
+            return error("BUVERSION received but we never sent a VERACK message - banning peer=%d version=%s ip=%s",
+                pfrom->GetId(), pfrom->cleanSubVer, pfrom->addrName.c_str());
         }
         // Each connection can only send one version message
         if (pfrom->addrFromPort != 0)
@@ -6038,7 +6082,8 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
             pfrom->PushMessage(NetMsgType::REJECT, strCommand, REJECT_DUPLICATE, std::string("Duplicate BU version message"));
             LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 100);
-            return error("Duplicate BU version message received from peer=%d", pfrom->GetId());
+            return error("Duplicate BU version message received from peer=%d version=%s ip=%s",
+                pfrom->GetId(), pfrom->cleanSubVer, pfrom->addrName.c_str());
         }
 
         // addrFromPort is needed for connecting and initializing Xpedited forwarding.
@@ -6053,7 +6098,8 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
         {
             LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 100);
-            return error("BUVERACK received but we never sent a BUVERSION message - banning peer=%d", pfrom->GetId());
+            return error("BUVERACK received but we never sent a BUVERSION message - banning peer=%d version=%s ip=%s",
+                pfrom->GetId(), pfrom->cleanSubVer, pfrom->addrName.c_str());
         }
 
         // This step done after final handshake
@@ -6671,7 +6717,8 @@ bool SendMessages(CNode* pto)
 {
     const Consensus::Params& consensusParams = Params().GetConsensus();
     {
-        // Don't send anything until we get its version message
+        // Don't send anything until we get its version message otherwise we may
+        // end up geting ourselves banned by the receiving peer.
         if (pto->nVersion == 0)
             return true;
 
