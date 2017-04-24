@@ -5987,8 +5987,15 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
     }
 
     // BUIP010 Xtreme Thinblocks: begin section
-    else if (strCommand == NetMsgType::GET_XTHIN && !fImporting && !fReindex) // Ignore blocks received while importing
+    else if (strCommand == NetMsgType::GET_XTHIN && !fImporting && !fReindex && IsThinBlocksEnabled())
     {
+
+        if (!pfrom->ThinBlockCapable())
+        {
+            LOCK(cs_main);
+            Misbehaving(pfrom->GetId(), 100);
+            return error("Thinblock message received from a non thinblock node, peer=%d", pfrom->GetId());
+        }
 
         // Check for Misbehaving and DOS
         // If they make more than 20 requests in 10 minutes then disconnect them
@@ -6106,9 +6113,17 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
         CheckAndRequestExpeditedBlocks(pfrom);
     }
 
-
-    else if (strCommand == NetMsgType::XTHINBLOCK  && !fImporting && !fReindex) // BU received extreme thin block -- but ignore blocks received while importing
+    else if (strCommand == NetMsgType::XTHINBLOCK && !fImporting && !fReindex &&
+        !IsInitialBlockDownload() &&
+        IsThinBlocksEnabled())
     {
+        if (!pfrom->ThinBlockCapable())
+        {
+            LOCK(cs_main);
+            Misbehaving(pfrom->GetId(), 100);
+            return error("xthinblock message received from a non thinblock node, peer=%d", pfrom->GetId());
+        }
+
         CXThinBlock thinBlock;
         vRecv >> thinBlock;
 
@@ -6125,13 +6140,31 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
         if (!IsRecentlyExpeditedAndStore(inv.hash))
             SendExpeditedBlock(thinBlock, 0, pfrom);
 
+        // Is there a previous block or header to connect with?
+        {
+            LOCK(cs_main);
+            uint256 prevHash = thinBlock.header.hashPrevBlock;
+            BlockMap::iterator mi = mapBlockIndex.find(prevHash);
+            if (mi == mapBlockIndex.end())
+            {
+                Misbehaving(pfrom->GetId(), 10);
+                return error("xthinblock %s from peer %s (%d) will not connect", prevHash.ToString(),
+                    pfrom->addrName.c_str(),
+                    pfrom->id);
+            }
+        }
+
         int nSizeThinBlock = ::GetSerializeSize(thinBlock, SER_NETWORK, PROTOCOL_VERSION);
-        LogPrint("thin", "Received thinblock %s from peer %s (%d). Size %d bytes.\n", inv.hash.ToString(), pfrom->addrName.c_str(), pfrom->id, nSizeThinBlock);
+        LogPrint("thin", "Received xthinblock %s from peer %s (%d). Size %d bytes.\n", inv.hash.ToString(),
+            pfrom->addrName.c_str(),
+            pfrom->id,
+            nSizeThinBlock);
 
         bool fAlreadyHave = false;
         // An expedited block or re-requested xthin can arrive and beat the original thin block request/response
-        if (!pfrom->mapThinBlocksInFlight.count(inv.hash)) {
-            LogPrint("thin", "Thinblock %s from peer %s (%d) received but we already have it\n", inv.hash.ToString(), pfrom->addrName.c_str(), pfrom->id);
+        if (!pfrom->mapThinBlocksInFlight.count(inv.hash))
+        {
+            LogPrint("thin", "xthinblock %s from peer %s (%d) received but we may already have processed it\n", inv.hash.ToString(), pfrom->addrName.c_str(), pfrom->id);
             LOCK(cs_main);
             fAlreadyHave = AlreadyHave(inv); // I'll still continue processing if we don't have an accepted block yet
             if (fAlreadyHave)
@@ -6142,8 +6175,18 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
            thinBlock.process(pfrom, nSizeThinBlock, strCommand);
     }
 
-    else if (strCommand == NetMsgType::THINBLOCK && !fImporting && !fReindex) // Ignore blocks received while importing
+
+    else if (strCommand == NetMsgType::THINBLOCK && !fImporting && !fReindex &&
+        !IsInitialBlockDownload() &&
+        IsThinBlocksEnabled())
     {
+        if (!pfrom->ThinBlockCapable())
+        {
+            LOCK(cs_main);
+            Misbehaving(pfrom->GetId(), 100);
+            return error("Thinblock message received from a non thinblock node, peer=%d", pfrom->GetId());
+        }
+
         CThinBlock thinBlock;
         vRecv >> thinBlock;
 
@@ -6155,10 +6198,29 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
             return error("Invalid thinblock received");
         }
 
+        // Is there a previous block or header to connect with?
+        {
+            LOCK(cs_main);
+            uint256 prevHash = thinBlock.header.hashPrevBlock;
+            BlockMap::iterator mi = mapBlockIndex.find(prevHash);
+            if (mi == mapBlockIndex.end())
+            {
+                Misbehaving(pfrom->GetId(), 10);
+                return error("thinblock %s from peer %s (%d) will not connect", prevHash.ToString(),
+                    pfrom->addrName.c_str(),
+                    pfrom->id);
+            }
+        }
+
         CInv inv(MSG_BLOCK, thinBlock.header.GetHash());
         int nSizeThinBlock = ::GetSerializeSize(thinBlock, SER_NETWORK, PROTOCOL_VERSION);
-        LogPrint("thin", "received thinblock %s from peer %s (%d) of %d bytes\n", inv.hash.ToString(), pfrom->addrName.c_str(),pfrom->id, nSizeThinBlock);
-        if (!pfrom->mapThinBlocksInFlight.count(inv.hash)) {
+        LogPrint("thin", "received thinblock %s from peer %s (%d) of %d bytes\n", inv.hash.ToString(),
+            pfrom->addrName.c_str(),
+            pfrom->id,
+            nSizeThinBlock);
+
+        if (!pfrom->mapThinBlocksInFlight.count(inv.hash))
+        {
             LogPrint("thin", "Thinblock received but not requested %s  peer=%d\n",inv.hash.ToString(), pfrom->id);
             LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 20);
@@ -6166,8 +6228,19 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
 
         thinBlock.process(pfrom, nSizeThinBlock, strCommand);
     }
-    else if (strCommand == NetMsgType::GET_XBLOCKTX && !fImporting && !fReindex) // return Re-requested xthinblock transactions
+
+
+    else if (strCommand == NetMsgType::GET_XBLOCKTX && !fImporting && !fReindex &&
+        !IsInitialBlockDownload() &&
+        IsThinBlocksEnabled())
     {
+        if (!pfrom->ThinBlockCapable())
+        {
+            LOCK(cs_main);
+            Misbehaving(pfrom->GetId(), 100);
+            return error("Thinblock message received from a non thinblock node, peer=%d", pfrom->GetId());
+        }
+
         CXRequestThinBlockTx thinRequestBlockTx;
         vRecv >> thinRequestBlockTx;
 
@@ -6234,8 +6307,18 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
         }
     }
 
-    else if (strCommand == NetMsgType::XBLOCKTX && !fImporting && !fReindex) // handle Re-requested thinblock transactions
+
+    else if (strCommand == NetMsgType::XBLOCKTX && !fImporting && !fReindex &&
+        !IsInitialBlockDownload() &&
+        IsThinBlocksEnabled())
     {
+        if (!pfrom->ThinBlockCapable())
+        {
+            LOCK(cs_main);
+            Misbehaving(pfrom->GetId(), 100);
+            return error("Thinblock message received from a non thinblock node, peer=%d", pfrom->GetId());
+        }
+
         CXThinBlockTx thinBlockTx;
         vRecv >> thinBlockTx;
 
@@ -6331,6 +6414,17 @@ bool ProcessMessage(CNode* pfrom, std::string strCommand, CDataStream& vRecv, in
         CInv inv(MSG_BLOCK, block.GetHash());
         LogPrint("blk", "received block %s peer=%d\n", inv.hash.ToString(), pfrom->id);
         UnlimitedLogBlock(block, inv.hash.ToString(), receiptTime);
+
+        // If block was never requested then ban the peer. We should never received 
+        // unrequested blocks unless we are doing testing in regtest.
+        {
+            LOCK(cs_main);
+            if (mapBlocksInFlight.find(inv.hash) == mapBlocksInFlight.end() && !pfrom->fWhitelisted)
+            {
+                Misbehaving(pfrom->GetId(), 100);
+                return error("Block %s was never requested, banning peer=%d", inv.hash.ToString(), pfrom->GetId());
+            }
+        }
 
         if (IsChainNearlySyncd()) // BU send the received block out expedited channels quickly
         {
