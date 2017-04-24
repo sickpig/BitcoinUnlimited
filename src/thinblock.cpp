@@ -1119,6 +1119,7 @@ void SendXThinBlock(CBlock &block, CNode *pfrom, const CInv &inv)
     }
     else
     {
+        // protected by external lock on cs_main
         Misbehaving(pfrom->GetId(), 100);
         return;
     }
