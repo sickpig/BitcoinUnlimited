@@ -619,9 +619,11 @@ bool CXThinBlock::HandleMessage(CDataStream &vRecv, CNode *pfrom, string strComm
         if (pIndex->nStatus & BLOCK_HAVE_DATA)
         {
             // Tell the Request Manager we received this block
-            requester.Received(inv, pfrom, nSizeThinBlock);
+            requester.AlreadyReceived(inv);
 
             ClearThinBlockInFlight(pfrom, thinBlock.header.GetHash());
+            LogPrint("thin", "Returning because we already have block data %s from peer %s hop %d size %d bytes\n",
+                inv.hash.ToString(), pfrom->GetLogName(), nHops, nSizeThinBlock);
             return true;
         }
 
@@ -768,7 +770,7 @@ bool CXThinBlock::process(CNode *pfrom,
                 }
                 else
                 {
-                    LogPrint("thin", "Xthin block has either repeated or missing transactions");
+                    LogPrint("thin", "Xthin block has either repeated or missing transactions\n");
                     collision = true;
                     break;
                 }
