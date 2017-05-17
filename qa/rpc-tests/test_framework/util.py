@@ -38,6 +38,12 @@ PerfectFractions = True
 BTC = 100000000
 mBTC = 100000
 uBTC = 100
+# The maximum number of nodes a single test can spawn
+MAX_NODES = 8
+# Don't assign rpc or p2p ports lower than this
+PORT_MIN = 11000
+# The number of ports to "reserve" for p2p and rpc, each
+PORT_RANGE = 5000
 
 #Set Mocktime default to OFF.
 #MOCKTIME is only needed for scripts that use the
@@ -93,44 +99,11 @@ def get_rpc_proxy(url, node_number, timeout=None):
 
 
 def p2p_port(n):
-    #If port is already defined then return port
-    if os.getenv("node" + str(n)):
-        return int(os.getenv("node" + str(n)))
-    #If no port defined then find an available port
-    if n == 0:
-        port = 11000 + n + os.getpid()%990
-    else:
-        port = int(os.getenv("node" + str(n-1))) + 1
-    from subprocess import check_output
-    netStatOut = check_output(["netstat", "-n"])
-    for portInUse in re.findall(b"tcp.*?:(11\d\d\d)",netStatOut.lower()):
-        #print portInUse
-        if port == int(portInUse):
-            port += 1
-    os.environ["node" + str(n)] = str(port)
-
-    #print "port node " + str(n) + " is " + str(port)
-    return int(port)
+    assert(n <= MAX_NODES)
+    return PORT_MIN + n + (MAX_NODES * os.getpid()) % (PORT_RANGE - 1 - MAX_NODES)
 
 def rpc_port(n):
-    #If port is already defined then return port
-    if os.getenv("rpcnode" + str(n)):
-        return int(os.getenv("rpcnode" + str(n)))
-    #If no port defined then find an available port
-    if n == 0:
-        port = 12000 + n + os.getpid()%990
-    else:
-        port = int(os.getenv("rpcnode" + str(n-1))) + 1
-    from subprocess import check_output
-    netStatOut = check_output(["netstat", "-n"])
-    for portInUse in re.findall(b"tcp.*?:(12\d\d\d)",netStatOut.lower()):
-        #print portInUse
-        if port == int(portInUse):
-            port += 1
-    os.environ["rpcnode" + str(n)] = str(port)
-
-    #print "port rpcnode " + str(n) + " is " + str(port)
-    return int(port)
+    return PORT_MIN + PORT_RANGE + n + (MAX_NODES * os.getpid()) % (PORT_RANGE -1 - MAX_NODES)
 
 def check_json_precision():
     """Make sure json library being used does not lose precision converting BTC values"""
@@ -353,8 +326,8 @@ def start_nodes(num_nodes, dirname, extra_args=None, rpchost=None, binary=None,t
     """
     Start multiple bitcoinds, return RPC connections to them
     """
-    if extra_args is None: extra_args = [ None for i in range(num_nodes) ]
-    if binary is None: binary = [ None for i in range(num_nodes) ]
+    if extra_args is None: extra_args = [ None for _ in range(num_nodes) ]
+    if binary is None: binary = [ None for _ in range(num_nodes) ]
     rpcs = []
     try:
         for i in range(num_nodes):
