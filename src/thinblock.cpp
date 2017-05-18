@@ -391,9 +391,8 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom)
     }
 
     // Create the mapMissingTx from all the supplied tx's in the xthinblock
-    std::map<uint64_t, CTransaction> mapMissingTx;
     BOOST_FOREACH (CTransaction tx, thinBlockTx.vMissingTx)
-        mapMissingTx[tx.GetHash().GetCheapHash()] = tx;
+        pfrom->mapMissingTx[tx.GetHash().GetCheapHash()] = tx;
 
     int count = 0;
     uint64_t maxAllowedSize = maxMessageSizeMultiplier * excessiveBlockSize;
@@ -403,8 +402,8 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom)
     {
         if (pfrom->thinBlock.vtx[i].IsNull())
         {
-            std::map<uint64_t, CTransaction>::iterator val = mapMissingTx.find(pfrom->xThinBlockHashes[i]);
-            if (val != mapMissingTx.end())
+            std::map<uint64_t, CTransaction>::iterator val = pfrom->mapMissingTx.find(pfrom->xThinBlockHashes[i]);
+            if (val != pfrom->mapMissingTx.end())
             {
                 pfrom->thinBlock.vtx[i] = val->second;
                 pfrom->thinBlockWaitingForTxns--;
@@ -699,9 +698,8 @@ bool CXThinBlock::process(CNode *pfrom,
     uint64_t maxAllowedSize = maxMessageSizeMultiplier * excessiveBlockSize;
 
     // Create the mapMissingTx from all the supplied tx's in the xthinblock
-    map<uint256, CTransaction> mapMissingTx;
     for (const CTransaction tx : vMissingTx)
-        mapMissingTx[tx.GetHash()] = tx;
+        pfrom->mapMissingTx[tx.GetHash().GetCheapHash()] = tx;
 
     // Create a map of all 8 bytes tx hashes pointing to their full tx hash counterpart
     // We need to check all transaction sources (orphan list, mempool, and new (incoming) transactions in this block)
@@ -738,9 +736,10 @@ bool CXThinBlock::process(CNode *pfrom,
                 collision = true;
             mapPartialTxHash[cheapHash] = memPoolHashes[i];
         }
-        for (map<uint256, CTransaction>::iterator mi = mapMissingTx.begin(); mi != mapMissingTx.end(); ++mi)
+        for (map<uint64_t, CTransaction>::iterator mi = pfrom->mapMissingTx.begin(); mi != pfrom->mapMissingTx.end();
+             ++mi)
         {
-            uint64_t cheapHash = (*mi).first.GetCheapHash();
+            uint64_t cheapHash = (*mi).first;
             // Check for cheap hash collision. Only mark as collision if the full hash is not the same,
             // because the same tx could have been received into the mempool during the request of the xthinblock.
             // In that case we would have the same transaction twice, so it is not a real cheap hash collision and we
@@ -748,12 +747,12 @@ bool CXThinBlock::process(CNode *pfrom,
             const uint256 existingHash = mapPartialTxHash[cheapHash];
             if (!existingHash.IsNull())
             { // Check if we already have the cheap hash
-                if (existingHash != (*mi).first)
+                if (existingHash != (*mi).second.GetHash())
                 { // Check if it really is a cheap hash collision and not just the same transaction
                     collision = true;
                 }
             }
-            mapPartialTxHash[cheapHash] = (*mi).first;
+            mapPartialTxHash[cheapHash] = (*mi).second.GetHash();
         }
 
         if (!collision)
@@ -795,7 +794,7 @@ bool CXThinBlock::process(CNode *pfrom,
                         if (!hash.IsNull())
                         {
                             bool inMemPool = mempool.lookup(hash, tx);
-                            bool inMissingTx = mapMissingTx.count(hash) > 0;
+                            bool inMissingTx = pfrom->mapMissingTx.count(hash.GetCheapHash()) > 0;
                             bool inOrphanCache = mapOrphanTransactions.count(hash) > 0;
 
                             if ((inMemPool && inMissingTx) || (inOrphanCache && inMissingTx))
@@ -809,7 +808,7 @@ bool CXThinBlock::process(CNode *pfrom,
                             else if (inMemPool && fXVal)
                                 setPreVerifiedTxHash.insert(hash);
                             else if (inMissingTx)
-                                tx = mapMissingTx[hash];
+                                tx = pfrom->mapMissingTx[hash.GetCheapHash()];
                         }
                         if (tx.IsNull())
                             missingCount++;
@@ -875,7 +874,7 @@ bool CXThinBlock::process(CNode *pfrom,
 
     pfrom->thinBlockWaitingForTxns = missingCount;
     LogPrint("thin", "thinblock waiting for: %d, unnecessary: %d, txs: %d full: %d\n", pfrom->thinBlockWaitingForTxns,
-        unnecessaryCount, pfrom->thinBlock.vtx.size(), mapMissingTx.size());
+        unnecessaryCount, pfrom->thinBlock.vtx.size(), pfrom->mapMissingTx.size());
 
     // If there are any missing hashes or transactions then we request them here.
     // This must be done outside of the mempool.cs lock or may deadlock.
@@ -1385,6 +1384,7 @@ void CThinBlockData::ClearThinBlockData(CNode *pnode)
     pnode->thinBlock.SetNull();
     pnode->xThinBlockHashes.clear();
     pnode->thinBlockHashes.clear();
+    pnode->mapMissingTx.clear();
 
     LogPrint("thin", "Total in memory thinblockbytes size after clearing a thinblock is %ld bytes\n",
         thindata.GetThinBlockBytes());
