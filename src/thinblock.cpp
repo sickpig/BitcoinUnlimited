@@ -850,10 +850,6 @@ bool CXThinBlock::process(CNode *pfrom,
     } // End locking cs_orphancache, mempool.cs and cs_xval
     LogPrint("thin", "Total in memory thinblockbytes size is %ld bytes\n", thindata.GetThinBlockBytes());
 
-    // Clear out data we no longer need before processing block or making re-requests.
-    pfrom->xThinBlockHashes.clear();
-    mapPartialTxHash.clear();
-
     // There is a remote possiblity of a Tx hash collision therefore if it occurs we re-request a normal
     // thinblock which has the full Tx hash data rather than just the truncated hash.
     if (collision)
