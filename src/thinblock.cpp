@@ -405,6 +405,18 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom)
         }
     }
 
+    // At this point we should have all the full hashes in the block. Check that the merkle
+    // root in the block header matches the merkel root calculated from the hashes provided.
+    bool mutated;
+    uint256 merkleroot = ComputeMerkleRoot(pfrom->thinBlockHashes, &mutated);
+    if (pfrom->thinBlock.hashMerkleRoot != merkleroot || mutated)
+    {
+        LOCK(cs_main);
+        Misbehaving(pfrom->GetId(), 100);
+        return error("Thinblock merkle root does not match computed merkle root, peer=%d", pfrom->GetId());
+    }
+    LogPrint("thin", "Merkle Root check passed\n");
+
     int count = 0;
     uint64_t maxAllowedSize = maxMessageSizeMultiplier * excessiveBlockSize;
     CTransaction nulltx;
