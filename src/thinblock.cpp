@@ -698,7 +698,7 @@ bool CXThinBlock::process(CNode *pfrom,
     uint64_t maxAllowedSize = maxMessageSizeMultiplier * excessiveBlockSize;
 
     // Create the mapMissingTx from all the supplied tx's in the xthinblock
-    for (const CTransaction tx : vMissingTx)
+    BOOST_FOREACH (const CTransaction tx, vMissingTx)
         pfrom->mapMissingTx[tx.GetHash().GetCheapHash()] = tx;
 
     // Create a map of all 8 bytes tx hashes pointing to their full tx hash counterpart
