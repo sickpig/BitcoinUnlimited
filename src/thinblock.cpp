@@ -364,11 +364,10 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string 
     CInv inv(MSG_XTHINBLOCK, thinBlockTx.blockhash);
     if (thinBlockTx.vMissingTx.empty() || thinBlockTx.blockhash.IsNull())
     {
+        thindata.ClearThinBlockData(pfrom);
         {
-            LOCK2(cs_vNodes, pfrom->cs_mapthinblocksinflight);
+            LOCK(pfrom->cs_mapthinblocksinflight);
             pfrom->mapThinBlocksInFlight.erase(inv.hash);
-            pfrom->thinBlockWaitingForTxns = -1;
-            pfrom->thinBlock.SetNull();
         }
 
         LOCK(cs_main);
