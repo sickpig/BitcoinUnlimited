@@ -394,6 +394,17 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom)
     BOOST_FOREACH (CTransaction tx, thinBlockTx.vMissingTx)
         pfrom->mapMissingTx[tx.GetHash().GetCheapHash()] = tx;
 
+    // Get the full hashes from the xblocktx and add them to the thinBlockHashes vector.  These should
+    // be all the missing or null hashes that we re-requested.
+    for (size_t i = 0; i < pfrom->thinBlockHashes.size(); i++)
+    {
+        std::map<uint64_t, CTransaction>::iterator val = pfrom->mapMissingTx.find(pfrom->xThinBlockHashes[i]);
+        if (val != pfrom->mapMissingTx.end())
+        {
+            pfrom->thinBlockHashes[i] = val->second.GetHash();
+        }
+    }
+
     int count = 0;
     uint64_t maxAllowedSize = maxMessageSizeMultiplier * excessiveBlockSize;
     CTransaction nulltx;
