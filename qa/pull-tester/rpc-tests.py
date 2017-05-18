@@ -329,6 +329,8 @@ def runtests():
                 if run_extended:
                     tests_to_run += testScriptsExt
 
+        port_seed = ("--portseed=%s" % len(tests_to_run))
+
         # weed out the disabled / skipped tests and print them beforehand
         # this allows earlier intervention in case a test is unexpectedly
         # skipped
@@ -350,6 +352,9 @@ def runtests():
         for t in tests_to_run:
             scriptname=re.sub(".py$", "", str(t).split(' ')[0])
             fullscriptcmd=str(t)
+
+            # add port seeder to the default opts
+            passOn += port_seed
 
             # print the wrapper-specific help options
             if showHelp:

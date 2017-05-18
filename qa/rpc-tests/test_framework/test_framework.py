@@ -9,6 +9,8 @@
 # Add python-bitcoinrpc to module search path:
 import os
 import sys
+import logging
+import optparse
 import time       # BU added
 import random     # BU added
 import shutil
@@ -27,7 +29,9 @@ from .util import (
     enable_coverage,
     check_json_precision,
     initialize_chain_clean,
+    PortSeed,
 )
+# need to remove AuthServiceProxy per core cccccc ?
 from .authproxy import AuthServiceProxy, JSONRPCException
 
 
@@ -139,6 +143,8 @@ class BitcoinTestFramework(object):
                           help="Root directory for datadirs")
         parser.add_option("--tracerpc", dest="trace_rpc", default=False, action="store_true",
                           help="Print out all RPC calls as they are made")
+        parser.add_option("--portseed", dest="port_seed", default=os.getpid(), type='int',
+                          help="The seed to use for assigning port numbers (default: current process id)")
         parser.add_option("--coveragedir", dest="coveragedir",
                           help="Write tested RPC commands into this directory")
         # BU: added for tests using randomness (e.g. excessive.py)
@@ -161,6 +167,8 @@ class BitcoinTestFramework(object):
 
         if self.options.coveragedir:
             enable_coverage(self.options.coveragedir)
+
+        PortSeed.n = self.options.port_seed
 
         os.environ['PATH'] = self.options.srcdir+":"+self.options.srcdir+"/qt:"+os.environ['PATH']
 
