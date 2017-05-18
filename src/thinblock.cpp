@@ -902,40 +902,20 @@ bool CXThinBlock::process(CNode *pfrom,
         return error("Still missing transactions for xthinblock: re-requesting a full block");
     }
 
-    if (pfrom->thinBlockWaitingForTxns == 0)
-    {
-        // We have all the transactions now that are in this block: try to reassemble and process.
-        pfrom->thinBlockWaitingForTxns = -1;
-        int blockSize = pfrom->thinBlock.GetSerializeSize(SER_NETWORK, CBlock::CURRENT_VERSION);
-        LogPrint("thin", "Reassembled thin block for %s (%d bytes). Message was %d bytes, compression ratio %3.2f\n",
-            pfrom->thinBlock.GetHash().ToString(), blockSize, pfrom->nSizeThinBlock,
-            ((float)blockSize) / ((float)pfrom->nSizeThinBlock));
+    // We now have all the transactions now that are in this block
+    pfrom->thinBlockWaitingForTxns = -1;
+    int blockSize = pfrom->thinBlock.GetSerializeSize(SER_NETWORK, CBlock::CURRENT_VERSION);
+    LogPrint("thin", "Reassembled thin block for %s (%d bytes). Message was %d bytes, compression ratio %3.2f\n",
+        pfrom->thinBlock.GetHash().ToString(), blockSize, pfrom->nSizeThinBlock,
+        ((float)blockSize) / ((float)pfrom->nSizeThinBlock));
 
-        // Update run-time statistics of thin block bandwidth savings
-        thindata.UpdateInBound(pfrom->nSizeThinBlock, blockSize);
-        string ss = thindata.ToString();
-        LogPrint("thin", "thin block stats: %s\n", ss.c_str());
-        requester.Received(GetInv(), pfrom, pfrom->nSizeThinBlock);
+    // Update run-time statistics of thin block bandwidth savings
+    thindata.UpdateInBound(pfrom->nSizeThinBlock, blockSize);
+    LogPrint("thin", "thin block stats: %s\n", thindata.ToString().c_str());
+    requester.Received(GetInv(), pfrom, pfrom->nSizeThinBlock);
 
-        PV.HandleBlockMessage(pfrom, strCommand, pfrom->thinBlock, GetInv());
-    }
-    else if (pfrom->thinBlockWaitingForTxns > 0)
-    {
-        // This marks the end of the transactions we've received. If we get this and we have NOT been able to
-        // finish reassembling the block, we need to re-request the transactions we're missing:
-        set<uint64_t> setHashesToRequest;
-        for (size_t i = 0; i < pfrom->thinBlock.vtx.size(); i++)
-        {
-            if (pfrom->thinBlock.vtx[i].IsNull())
-                setHashesToRequest.insert(pfrom->xThinBlockHashes[i]);
-        }
-
-        // Re-request transactions that we are still missing
-        CXRequestThinBlockTx thinBlockTx(header.GetHash(), setHashesToRequest);
-        pfrom->PushMessage(NetMsgType::GET_XBLOCKTX, thinBlockTx);
-        LogPrint("thin", "Missing %d transactions for xthinblock, re-requesting\n", pfrom->thinBlockWaitingForTxns);
-        thindata.UpdateInBoundReRequestedTx(pfrom->thinBlockWaitingForTxns);
-    }
+    // Process the full block
+    PV.HandleBlockMessage(pfrom, strCommand, pfrom->thinBlock, GetInv());
 
     return true;
 }
