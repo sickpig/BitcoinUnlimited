@@ -877,6 +877,31 @@ bool CXThinBlock::process(CNode *pfrom,
     LogPrint("thin", "thinblock waiting for: %d, unnecessary: %d, txs: %d full: %d\n", pfrom->thinBlockWaitingForTxns,
         unnecessaryCount, pfrom->thinBlock.vtx.size(), mapMissingTx.size());
 
+    // If there are any missing hashes or transactions then we request them here.
+    // This must be done outside of the mempool.cs lock or may deadlock.
+    if (setHashesToRequest.size() > 0)
+    {
+        pfrom->thinBlockWaitingForTxns = setHashesToRequest.size();
+        CXRequestThinBlockTx thinBlockTx(header.GetHash(), setHashesToRequest);
+        pfrom->PushMessage(NetMsgType::GET_XBLOCKTX, thinBlockTx);
+
+        thindata.UpdateInBoundReRequestedTx(pfrom->thinBlockWaitingForTxns);
+        return true;
+    }
+
+    // If there are still any missing transactions then we must clear out the thinblock data
+    // and re-request a full block (This should never happen because we just checked the various pools).
+    if (missingCount > 0)
+    {
+        // Since we can't process this thinblock then clear out the data from memory
+        thindata.ClearThinBlockData(pfrom);
+
+        std::vector<CInv> vGetData;
+        vGetData.push_back(CInv(MSG_BLOCK, header.GetHash()));
+        pfrom->PushMessage(NetMsgType::GETDATA, vGetData);
+        return error("Still missing transactions for xthinblock: re-requesting a full block");
+    }
+
     if (pfrom->thinBlockWaitingForTxns == 0)
     {
         // We have all the transactions now that are in this block: try to reassemble and process.
