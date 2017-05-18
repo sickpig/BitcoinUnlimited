@@ -711,6 +711,7 @@ bool CXThinBlock::process(CNode *pfrom,
     bool collision = false;
     map<uint64_t, uint256> mapPartialTxHash;
     vector<uint256> memPoolHashes;
+    set<uint64_t> setHashesToRequest;
 
     bool fMerkleRootCorrect = true;
     {
@@ -755,31 +756,27 @@ bool CXThinBlock::process(CNode *pfrom,
             mapPartialTxHash[cheapHash] = (*mi).first;
         }
 
-        std::vector<uint256> fullTxHashes;
         if (!collision)
         {
-            // Check that the merkleroot matches the merkelroot calculated from the hashes provided.
-            for (const uint64_t &cheapHash : vTxHashes)
+
+            // Start gathering the full tx hashes. If some are not available then add them to setHashesToRequest.
+            uint256 nullhash;
+            BOOST_FOREACH (const uint64_t &cheapHash, vTxHashes)
             {
-                map<uint64_t, uint256>::iterator val = mapPartialTxHash.find(cheapHash);
-                if (val != mapPartialTxHash.end())
-                {
-                    fullTxHashes.push_back(val->second);
-                    // Remove this transaction so attack blocks that repeat the same transaction stop here.
-                    mapPartialTxHash.erase(val);
-                }
+                if (mapPartialTxHash.find(cheapHash) != mapPartialTxHash.end())
+                    pfrom->thinBlockHashes.push_back(mapPartialTxHash[cheapHash]);
                 else
                 {
-                    LogPrint("thin", "Xthin block has either repeated or missing transactions\n");
-                    collision = true;
-                    break;
+                    pfrom->thinBlockHashes.push_back(nullhash); // placeholder
+                    setHashesToRequest.insert(cheapHash);
                 }
             }
-        }
-        if (!collision)
-        {
+
+            // We don't need this after here.
+            mapPartialTxHash.clear();
+
             bool mutated;
-            uint256 merkleroot = ComputeMerkleRoot(fullTxHashes, &mutated);
+            uint256 merkleroot = ComputeMerkleRoot(pfrom->thinBlockHashes, &mutated);
             if (header.hashMerkleRoot != merkleroot || mutated)
             {
                 fMerkleRootCorrect = false;
@@ -788,7 +785,7 @@ bool CXThinBlock::process(CNode *pfrom,
             {
                 // Look for each transaction in our various pools and buffers.
                 // With xThinBlocks the vTxHashes contains only the first 8 bytes of the tx hash.
-                for (const uint256 hash : fullTxHashes)
+                BOOST_FOREACH (const uint256 hash, pfrom->thinBlockHashes)
                 {
                     // Replace the truncated hash with the full hash value if it exists
                     CTransaction tx;
@@ -822,7 +819,7 @@ bool CXThinBlock::process(CNode *pfrom,
                         nCurrentMax = maxAllowedSize - nTxSize;
                     if (thindata.AddThinBlockBytes(nTxSize, pfrom) > nCurrentMax)
                     {
-                        LogPrint("thin", "xthin block too large %lu %llu %llu\n", fullTxHashes.size(), nTxSize,
+                        LogPrint("thin", "xthin block too large %lu %llu %llu\n", pfrom->thinBlockHashes.size(), nTxSize,
                             pfrom->nLocalThinBlockBytes);
                         LEAVE_CRITICAL_SECTION(cs_xval); // maintain locking order with vNodes
                         if (ClearLargestThinBlockAndDisconnect(pfrom))
@@ -835,7 +832,7 @@ bool CXThinBlock::process(CNode *pfrom,
                     if (pfrom->nLocalThinBlockBytes > nCurrentMax)
                     {
                         LogPrint("thin", "node %s xthin block is too large %lu %llu %llu\n", pfrom->GetLogName(),
-                            fullTxHashes.size(), nTxSize, pfrom->nLocalThinBlockBytes);
+                            pfrom->thinBlockHashes.size(), nTxSize, pfrom->nLocalThinBlockBytes);
                         thindata.ClearThinBlockData(pfrom);
                         pfrom->fDisconnect = true;
                         return error("This thinblock has exceeded memory limits of %ld bytes", maxAllowedSize);
