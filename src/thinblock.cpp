@@ -412,7 +412,10 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string 
     if (pfrom->thinBlock.hashMerkleRoot != merkleroot || mutated)
     {
         thindata.ClearThinBlockData(pfrom);
-
+        {
+            LOCK(pfrom->cs_mapthinblocksinflight);
+            pfrom->mapThinBlocksInFlight.erase(inv.hash);
+        }
         LOCK(cs_main);
         Misbehaving(pfrom->GetId(), 100);
         return error("Thinblock merkle root does not match computed merkle root, peer=%d", pfrom->GetId());
@@ -501,6 +504,10 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string 
     {
         // Since we can't process this thinblock then clear out the data from memory
         thindata.ClearThinBlockData(pfrom);
+        {
+            LOCK(pfrom->cs_mapthinblocksinflight);
+            pfrom->mapThinBlocksInFlight.erase(inv.hash);
+        }
 
         std::vector<CInv> vGetData;
         vGetData.push_back(CInv(MSG_BLOCK, thinBlockTx.blockhash));
