@@ -854,24 +854,27 @@ bool CXThinBlock::process(CNode *pfrom,
     pfrom->xThinBlockHashes.clear();
     mapPartialTxHash.clear();
 
-    // These must be checked outside the above section or a deadlock may occur
-    // Expedited blocks are sent before checking the merkle root, so a mismatch should not attract a penalty
     // There is a remote possiblity of a Tx hash collision therefore if it occurs we re-request a normal
     // thinblock which has the full Tx hash data rather than just the truncated hash.
-    if (collision || !fMerkleRootCorrect)
+    if (collision)
     {
+        // This must be done outside of the mempool.cs lock or the deadlock
+        // detection with pfrom->cs_vSend will be triggered.
         vector<CInv> vGetData;
         vGetData.push_back(CInv(MSG_THINBLOCK, header.GetHash()));
-        // This must be done outside of the mempool.cs lock or the deadlock
         pfrom->PushMessage(NetMsgType::GETDATA, vGetData);
-        // detection with pfrom->cs_vSend will be triggered.
-        if (!fMerkleRootCorrect)
-            LogPrintf("mismatched merkle root on xthinblock: re-requesting a thinblock\n");
-        else
-            LogPrintf("TX HASH COLLISION for xthinblock: re-requesting a thinblock\n");
+        return error("TX HASH COLLISION for xthinblock: re-requesting a thinblock");
+    }
 
+    // This must be done outside of the above section or a deadlock may occur.
+    if (!fMerkleRootCorrect)
+    {
+        // Since we can't process this thinblock then clear out the data from memory
         thindata.ClearThinBlockData(pfrom);
-        return true;
+
+        LOCK(cs_main);
+        Misbehaving(pfrom->GetId(), 100);
+        return error("xthinblock merkle root does not match computed merkle root, peer=%d", pfrom->GetId());
     }
 
     pfrom->thinBlockWaitingForTxns = missingCount;
