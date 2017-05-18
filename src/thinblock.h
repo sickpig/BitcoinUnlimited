@@ -125,7 +125,7 @@ public:
      * @param[in] pFrom        The node the message was from
      * @return True if handling succeeded
      */
-    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom);
+    static bool HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string strCommand);
 
     ADD_SERIALIZE_METHODS;
 

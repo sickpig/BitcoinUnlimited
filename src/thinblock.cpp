@@ -347,7 +347,7 @@ CXThinBlockTx::CXThinBlockTx(uint256 blockHash, vector<CTransaction> &vTx)
     vMissingTx = vTx;
 }
 
-bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom)
+bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string strCommand)
 {
     if (!pfrom->ThinBlockCapable())
     {
@@ -411,6 +411,8 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom)
     uint256 merkleroot = ComputeMerkleRoot(pfrom->thinBlockHashes, &mutated);
     if (pfrom->thinBlock.hashMerkleRoot != merkleroot || mutated)
     {
+        thindata.ClearThinBlockData(pfrom);
+
         LOCK(cs_main);
         Misbehaving(pfrom->GetId(), 100);
         return error("Thinblock merkle root does not match computed merkle root, peer=%d", pfrom->GetId());
@@ -445,14 +447,74 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom)
     }
     LogPrint("thin", "Got %d Re-requested txs, needed %d of them\n", thinBlockTx.vMissingTx.size(), count);
 
-    if (pfrom->thinBlockWaitingForTxns == 0)
+    // Xpress Validation - only perform xval if the chaintip matches the last blockhash in the thinblock
+    bool fXVal;
+    {
+        LOCK(cs_main);
+        fXVal = (pfrom->thinBlock.hashPrevBlock == chainActive.Tip()->GetBlockHash()) ? true : false;
+    }
+
+    int missingCount = 0;
+    int unnecessaryCount = 0;
+    // Look for each transaction in our various pools and buffers.
+    // With xThinBlocks the vTxHashes contains only the first 8 bytes of the tx hash.
+    {
+        LOCK(cs_orphancache);
+        LOCK2(mempool.cs, cs_xval);
+        BOOST_FOREACH (const uint256 hash, pfrom->thinBlockHashes)
+        {
+            // Replace the truncated hash with the full hash value if it exists
+            CTransaction tx;
+            if (!hash.IsNull())
+            {
+                bool inMemPool = mempool.lookup(hash, tx);
+                bool inMissingTx = pfrom->mapMissingTx.count(hash.GetCheapHash()) > 0;
+                bool inOrphanCache = mapOrphanTransactions.count(hash) > 0;
+
+                if ((inMemPool && inMissingTx) || (inOrphanCache && inMissingTx))
+                    unnecessaryCount++;
+
+                if (inOrphanCache)
+                {
+                    tx = mapOrphanTransactions[hash].tx;
+                    setUnVerifiedOrphanTxHash.insert(hash);
+                }
+                else if (inMemPool && fXVal)
+                    setPreVerifiedTxHash.insert(hash);
+                else if (inMissingTx)
+                    tx = pfrom->mapMissingTx[hash.GetCheapHash()];
+            }
+            if (tx.IsNull())
+                missingCount++;
+
+            // This will push an empty/invalid transaction if we don't have it yet
+            pfrom->thinBlock.vtx.push_back(tx);
+        }
+    } // End locking cs_orphancache, mempool.cs and cs_xval
+
+    LogPrint("thin", "Got %d Re-requested txs, needed %d of them\n", thinBlockTx.vMissingTx.size(), count);
+
+    // If we're still missing transactions then bail out and just request the full block. This should never
+    // happen unless we're under some kind of attack or somehow we lost transactions out of our memory pool
+    // while we were retreiving missing transactions.
+    if (missingCount > 0)
+    {
+        // Since we can't process this thinblock then clear out the data from memory
+        thindata.ClearThinBlockData(pfrom);
+
+        std::vector<CInv> vGetData;
+        vGetData.push_back(CInv(MSG_BLOCK, thinBlockTx.blockhash));
+        pfrom->PushMessage(NetMsgType::GETDATA, vGetData);
+        return error("Still missing transactions for xthinblock: re-requesting a full block");
+    }
+    else
     {
         // We have all the transactions now that are in this block: try to reassemble and process.
-        pfrom->thinBlockWaitingForTxns = -1;
+        CInv inv(CInv(MSG_BLOCK, thinBlockTx.blockhash));
         requester.Received(inv, pfrom, msgSize);
 
         // for compression statistics, we have to add up the size of xthinblock and the re-requested thinBlockTx.
-        int nSizeThinBlockTx = ::GetSerializeSize(thinBlockTx, SER_NETWORK, PROTOCOL_VERSION);
+        int nSizeThinBlockTx = msgSize;
         int blockSize = pfrom->thinBlock.GetSerializeSize(SER_NETWORK, CBlock::CURRENT_VERSION);
         LogPrint("thin", "Reassembled thin block for %s (%d bytes). Message was %d bytes (thinblock) and %d bytes "
                          "(re-requested tx), compression ratio %3.2f\n",
@@ -465,14 +527,7 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom)
         thindata.UpdateInBound(nSizeThinBlockTx + pfrom->nSizeThinBlock, blockSize);
         LogPrint("thin", "thin block stats: %s\n", thindata.ToString());
 
-        PV.HandleBlockMessage(pfrom, NetMsgType::XBLOCKTX, pfrom->thinBlock, inv);
-    }
-    else
-    {
-        LogPrint("thin", "Failed to retrieve all transactions for block\n");
-        // An expedited block may request transactions that we don't have
-        // LOCK(cs_main);
-        // Misbehaving(pfrom->GetId(), 100);
+        PV.HandleBlockMessage(pfrom, strCommand, pfrom->thinBlock, inv);
     }
 
     return true;

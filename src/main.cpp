@@ -6719,7 +6719,7 @@ bool ProcessMessage(CNode *pfrom, std::string strCommand, CDataStream &vRecv, in
     else if (strCommand == NetMsgType::XBLOCKTX && !fImporting && !fReindex && !IsInitialBlockDownload() &&
              IsThinBlocksEnabled())
     {
-        return CXThinBlockTx::HandleMessage(vRecv, pfrom);
+        return CXThinBlockTx::HandleMessage(vRecv, pfrom, strCommand);
     }
     // BUIP010 Xtreme Thinblocks: end section
 
