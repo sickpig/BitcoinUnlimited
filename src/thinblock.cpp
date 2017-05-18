@@ -362,8 +362,7 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string 
 
     // Message consistency checking
     CInv inv(MSG_XTHINBLOCK, thinBlockTx.blockhash);
-    if (thinBlockTx.vMissingTx.empty() || thinBlockTx.blockhash.IsNull() ||
-        pfrom->xThinBlockHashes.size() != pfrom->thinBlock.vtx.size())
+    if (thinBlockTx.vMissingTx.empty() || thinBlockTx.blockhash.IsNull())
     {
         {
             LOCK2(cs_vNodes, pfrom->cs_mapthinblocksinflight);
