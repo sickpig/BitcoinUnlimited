@@ -342,13 +342,17 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string 
     int count = 0;
     for (size_t i = 0; i < pfrom->thinBlockHashes.size(); i++)
     {
-        std::map<uint64_t, CTransaction>::iterator val = pfrom->mapMissingTx.find(pfrom->xThinBlockHashes[i]);
-        if (val != pfrom->mapMissingTx.end())
+        if (pfrom->thinBlockHashes[i].IsNull())
         {
-            pfrom->thinBlockHashes[i] = val->second.GetHash();
+            std::map<uint64_t, CTransaction>::iterator val = pfrom->mapMissingTx.find(pfrom->xThinBlockHashes[i]);
+            if (val != pfrom->mapMissingTx.end())
+            {
+                pfrom->thinBlockHashes[i] = val->second.GetHash();
+            }
+            count++;
         }
-        count++;
     }
+    LogPrint("thin", "Got %d Re-requested txs, needed %d of them\n", thinBlockTx.vMissingTx.size(), count);
 
     // At this point we should have all the full hashes in the block. Check that the merkle
     // root in the block header matches the merkel root calculated from the hashes provided.
@@ -384,8 +388,6 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string 
         if (!ReconstructBlock(pfrom, fXVal, missingCount, unnecessaryCount))
             return false;
     }
-
-    LogPrint("thin", "Got %d Re-requested txs, needed %d of them\n", thinBlockTx.vMissingTx.size(), count);
 
     // If we're still missing transactions then bail out and just request the full block. This should never
     // happen unless we're under some kind of attack or somehow we lost transactions out of our memory pool
