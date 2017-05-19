@@ -766,27 +766,25 @@ bool CXThinBlock::process(CNode *pfrom,
     } // End locking cs_orphancache, mempool.cs and cs_xval
     LogPrint("thin", "Total in memory thinblockbytes size is %ld bytes\n", thindata.GetThinBlockBytes());
 
-    // There is a remote possiblity of a Tx hash collision therefore if it occurs we re-request a normal
+    // These must be checked outside of the mempool.cs lock or deadlock may occur.
+    // A merkle root mismatch here does not cause a ban because and expedited node will forward an xthin
+    // without checking the merkle root, therefore we don't want to ban our expedited nodes. Just re-request
+    // a full thinblock if a mismatch occurs.
+    // Also, there is a remote possiblity of a Tx hash collision therefore if it occurs we re-request a normal
     // thinblock which has the full Tx hash data rather than just the truncated hash.
-    if (collision)
+    if (collision || !fMerkleRootCorrect)
     {
-        // This must be done outside of the mempool.cs lock or the deadlock
-        // detection with pfrom->cs_vSend will be triggered.
         vector<CInv> vGetData;
         vGetData.push_back(CInv(MSG_THINBLOCK, header.GetHash()));
         pfrom->PushMessage(NetMsgType::GETDATA, vGetData);
-        return error("TX HASH COLLISION for xthinblock: re-requesting a thinblock");
-    }
 
-    // This must be done outside of the above section or a deadlock may occur.
-    if (!fMerkleRootCorrect)
-    {
-        // Since we can't process this thinblock then clear out the data from memory
+        if (!fMerkleRootCorrect)
+            return error("mismatched merkle root on xthinblock: rerequesting a thinblock, peer=%d", pfrom->GetId());
+        else
+            return error("TX HASH COLLISION for xthinblock: re-requesting a thinblock, peer=%d", pfrom->GetId());
+
         thindata.ClearThinBlockData(pfrom);
-
-        LOCK(cs_main);
-        Misbehaving(pfrom->GetId(), 100);
-        return error("xthinblock merkle root does not match computed merkle root, peer=%d", pfrom->GetId());
+        return true;
     }
 
     pfrom->thinBlockWaitingForTxns = missingCount;
