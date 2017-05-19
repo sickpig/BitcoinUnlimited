@@ -129,6 +129,18 @@ bool CThinBlock::HandleMessage(CDataStream &vRecv, CNode *pfrom)
         }
     }
 
+    // Check if we've already received this block and have it on disk
+    if (AlreadyHave(inv))
+    {
+        requester.AlreadyReceived(inv);
+
+        ClearThinBlockInFlight(pfrom, inv.hash);
+        thindata.ClearThinBlockData(pfrom);
+        LogPrint("thin", "Returning because we already have this block %s on disk, peer=%s\n", inv.hash.ToString(),
+            pfrom->GetLogName());
+        return true;
+    }
+
     return thinBlock.process(pfrom, nSizeThinBlock);
 }
 
@@ -331,6 +343,18 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string 
             return error(
                 "Received xblocktx %s from peer %s but was unrequested", inv.hash.ToString(), pfrom->GetLogName());
         }
+    }
+
+    // Check if we've already received this block and have it on disk
+    if (AlreadyHave(inv))
+    {
+        requester.AlreadyReceived(inv);
+
+        ClearThinBlockInFlight(pfrom, inv.hash);
+        thindata.ClearThinBlockData(pfrom);
+        LogPrint("thin", "Returning because we already have this block %s on disk, peer=%s\n", inv.hash.ToString(),
+            pfrom->GetLogName());
+        return true;
     }
 
     // Create the mapMissingTx from all the supplied tx's in the xthinblock
@@ -598,6 +622,7 @@ bool CXThinBlock::HandleMessage(CDataStream &vRecv, CNode *pfrom, string strComm
             requester.AlreadyReceived(inv);
 
             ClearThinBlockInFlight(pfrom, thinBlock.header.GetHash());
+            thindata.ClearThinBlockData(pfrom);
             LogPrint("thin", "Returning because we already have block data %s from peer %s hop %d size %d bytes\n",
                 inv.hash.ToString(), pfrom->GetLogName(), nHops, nSizeThinBlock);
             return true;
@@ -841,7 +866,7 @@ static bool ReconstructBlock(CNode *pfrom, const bool fXVal, int &missingCount, 
     AssertLockHeld(cs_xval);
     uint64_t maxAllowedSize = maxMessageSizeMultiplier * excessiveBlockSize;
 
-    // We must have all the full tx hashes by this point.  We first check for any repeating 
+    // We must have all the full tx hashes by this point.  We first check for any repeating
     // sequences in transaction id's.  This is a possible attack vector and has been used in the past.
     {
         std::set<uint256> setHashes(pfrom->thinBlockHashes.begin(), pfrom->thinBlockHashes.end());
