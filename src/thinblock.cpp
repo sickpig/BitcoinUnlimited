@@ -841,6 +841,20 @@ static bool ReconstructBlock(CNode *pfrom, const bool fXVal, int &missingCount, 
     AssertLockHeld(cs_xval);
     uint64_t maxAllowedSize = maxMessageSizeMultiplier * excessiveBlockSize;
 
+    // We must have all the full tx hashes by this point.  We first check for any repeating 
+    // sequences in transaction id's.  This is a possible attack vector and has been used in the past.
+    {
+        std::set<uint256> setHashes(pfrom->thinBlockHashes.begin(), pfrom->thinBlockHashes.end());
+        if (setHashes.size() != pfrom->thinBlockHashes.size())
+        {
+            thindata.ClearThinBlockData(pfrom);
+
+            LOCK(cs_main);
+            Misbehaving(pfrom->GetId(), 10);
+            return error("Repeating Transaction Id sequence, peer=%d", pfrom->GetId());
+        }
+    }
+
     // Look for each transaction in our various pools and buffers.
     // With xThinBlocks the vTxHashes contains only the first 8 bytes of the tx hash.
     BOOST_FOREACH (const uint256 hash, pfrom->thinBlockHashes)
