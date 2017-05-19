@@ -165,9 +165,8 @@ bool CThinBlock::process(CNode *pfrom, int nSizeThinBlock)
     }
 
     // Create the mapMissingTx from all the supplied tx's in the xthinblock
-    std::map<uint256, CTransaction> mapMissingTx;
-    for (const CTransaction tx : vMissingTx)
-        mapMissingTx[tx.GetHash()] = tx;
+    BOOST_FOREACH (const CTransaction tx, vMissingTx)
+        pfrom->mapMissingTx[tx.GetHash().GetCheapHash()] = tx;
 
     {
         LOCK(cs_orphancache);
@@ -181,7 +180,7 @@ bool CThinBlock::process(CNode *pfrom, int nSizeThinBlock)
         pfrom->thinBlockWaitingForTxns = missingCount;
         LogPrint("thin", "Thinblock %s waiting for: %d, unnecessary: %d, txs: %d full: %d\n",
             pfrom->thinBlock.GetHash().ToString(), pfrom->thinBlockWaitingForTxns, unnecessaryCount,
-            pfrom->thinBlock.vtx.size(), mapMissingTx.size());
+            pfrom->thinBlock.vtx.size(), pfrom->mapMissingTx.size());
     } // end lock cs_orphancache, mempool.cs, cs_xval
     LogPrint("thin", "Total in memory thinblockbytes size is %ld bytes\n", thindata.GetThinBlockBytes());
 
@@ -335,7 +334,7 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string 
     }
 
     // Create the mapMissingTx from all the supplied tx's in the xthinblock
-    BOOST_FOREACH (CTransaction tx, thinBlockTx.vMissingTx)
+    BOOST_FOREACH (const CTransaction tx, thinBlockTx.vMissingTx)
         pfrom->mapMissingTx[tx.GetHash().GetCheapHash()] = tx;
 
     // Get the full hashes from the xblocktx and add them to the thinBlockHashes vector.  These should
