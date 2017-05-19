@@ -28,6 +28,8 @@ extern CCriticalSection cs_thinblockstats;
 extern CCriticalSection cs_orphancache;
 extern map<uint256, COrphanTx> mapOrphanTransactions GUARDED_BY(cs_orphancache);
 
+static bool ReconstructBlock(CNode *pfrom, const bool fXVal, int &missingCount, int &unnecessaryCount);
+
 string formatInfoUnit(double value)
 {
     static const char *units[] = {"B", "KB", "MB", "GB", "TB", "PB", "EB"};
@@ -835,7 +837,7 @@ bool CXThinBlock::process(CNode *pfrom,
     return true;
 }
 
-bool ReconstructBlock(CNode *pfrom, const bool fXVal, int &missingCount, int &unnecessaryCount)
+static bool ReconstructBlock(CNode *pfrom, const bool fXVal, int &missingCount, int &unnecessaryCount)
 {
     AssertLockHeld(cs_xval);
     uint64_t maxAllowedSize = maxMessageSizeMultiplier * excessiveBlockSize;
