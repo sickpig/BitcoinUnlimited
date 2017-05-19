@@ -151,7 +151,6 @@ bool CThinBlock::process(CNode *pfrom, int nSizeThinBlock)
     pfrom->thinBlockHashes = vTxHashes;
 
     thindata.AddThinBlockBytes(vTxHashes.size() * sizeof(uint256), pfrom); // start counting bytes
-    uint64_t maxAllowedSize = maxMessageSizeMultiplier * excessiveBlockSize;
 
     // Check that the merkleroot matches the merkelroot calculated from the hashes provided.
     bool mutated;
@@ -170,68 +169,13 @@ bool CThinBlock::process(CNode *pfrom, int nSizeThinBlock)
 
     {
         LOCK(cs_orphancache);
-        // We don't have to keep the lock on mempool.cs here to do mempool.queryHashes
-        // but we take the lock anyway so we don't have to re-lock again later.
         LOCK2(mempool.cs, cs_xval);
         int missingCount = 0;
         int unnecessaryCount = 0;
 
-        // Look for each transaction in our various pools and buffers.
-        for (const uint256 &hash : vTxHashes)
-        {
-            CTransaction tx;
-            if (!hash.IsNull())
-            {
-                bool inMemPool = mempool.lookup(hash, tx);
-                bool inMissingTx = mapMissingTx.count(hash) > 0;
-                bool inOrphanCache = mapOrphanTransactions.count(hash) > 0;
+        if (!ReconstructBlock(pfrom, fXVal, missingCount, unnecessaryCount))
+            return false;
 
-                if ((inMemPool && inMissingTx) || (inOrphanCache && inMissingTx))
-                    unnecessaryCount++;
-
-                if (inOrphanCache)
-                {
-                    tx = mapOrphanTransactions[hash].tx;
-                    setUnVerifiedOrphanTxHash.insert(hash);
-                }
-                else if (inMemPool && fXVal)
-                    setPreVerifiedTxHash.insert(hash);
-                else if (inMissingTx)
-                    tx = mapMissingTx[hash];
-            }
-            if (tx.IsNull())
-                missingCount++;
-
-            // In order to prevent a memory exhaustion attack we track transaction bytes used to create Block
-            // to see if we've exceeded any limits and if so clear out data and return.
-            uint64_t nTxSize = RecursiveDynamicUsage(tx);
-            uint64_t nCurrentMax = 0;
-            if (maxAllowedSize >= nTxSize)
-                nCurrentMax = maxAllowedSize - nTxSize;
-            if (thindata.AddThinBlockBytes(nTxSize, pfrom) > nCurrentMax)
-            {
-                LogPrint("thin", "thin block too large %lu %llu %llu\n", vTxHashes.size(), nTxSize,
-                    pfrom->nLocalThinBlockBytes);
-                LEAVE_CRITICAL_SECTION(cs_xval); // maintain locking order with vNodes
-                if (ClearLargestThinBlockAndDisconnect(pfrom))
-                {
-                    ENTER_CRITICAL_SECTION(cs_xval);
-                    return error("Thinblock has exceeded memory limits of %ld bytes", maxAllowedSize);
-                }
-                ENTER_CRITICAL_SECTION(cs_xval);
-            }
-            if (pfrom->nLocalThinBlockBytes > nCurrentMax)
-            {
-                LogPrint("thin", "node %s xthin block is too large %lu %llu %llu\n", pfrom->GetLogName(),
-                    vTxHashes.size(), nTxSize, pfrom->nLocalThinBlockBytes);
-                thindata.ClearThinBlockData(pfrom);
-                pfrom->fDisconnect = true;
-                return error("This thinblock has exceeded memory limits of %ld bytes", maxAllowedSize);
-            }
-
-            // This will push an empty/invalid transaction if we don't have it yet
-            pfrom->thinBlock.vtx.push_back(tx);
-        }
         pfrom->thinBlockWaitingForTxns = missingCount;
         LogPrint("thin", "Thinblock %s waiting for: %d, unnecessary: %d, txs: %d full: %d\n",
             pfrom->thinBlock.GetHash().ToString(), pfrom->thinBlockWaitingForTxns, unnecessaryCount,
@@ -383,8 +327,8 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string 
         if (!pfrom->mapThinBlocksInFlight.count(inv.hash) && !IsExpeditedNode(pfrom))
         {
             Misbehaving(pfrom->GetId(), 10);
-            return error("Received xblocktx %s from peer %s but was unrequested", inv.hash.ToString(),
-                pfrom->GetLogName());
+            return error(
+                "Received xblocktx %s from peer %s but was unrequested", inv.hash.ToString(), pfrom->GetLogName());
         }
     }
 
@@ -431,69 +375,14 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string 
 
     int missingCount = 0;
     int unnecessaryCount = 0;
-    uint64_t maxAllowedSize = maxMessageSizeMultiplier * excessiveBlockSize;
     // Look for each transaction in our various pools and buffers.
     // With xThinBlocks the vTxHashes contains only the first 8 bytes of the tx hash.
     {
         LOCK(cs_orphancache);
         LOCK2(mempool.cs, cs_xval);
-        BOOST_FOREACH (const uint256 hash, pfrom->thinBlockHashes)
-        {
-            // Replace the truncated hash with the full hash value if it exists
-            CTransaction tx;
-            if (!hash.IsNull())
-            {
-                bool inMemPool = mempool.lookup(hash, tx);
-                bool inMissingTx = pfrom->mapMissingTx.count(hash.GetCheapHash()) > 0;
-                bool inOrphanCache = mapOrphanTransactions.count(hash) > 0;
-
-                if ((inMemPool && inMissingTx) || (inOrphanCache && inMissingTx))
-                    unnecessaryCount++;
-
-                if (inOrphanCache)
-                {
-                    tx = mapOrphanTransactions[hash].tx;
-                    setUnVerifiedOrphanTxHash.insert(hash);
-                }
-                else if (inMemPool && fXVal)
-                    setPreVerifiedTxHash.insert(hash);
-                else if (inMissingTx)
-                    tx = pfrom->mapMissingTx[hash.GetCheapHash()];
-            }
-            if (tx.IsNull())
-                missingCount++;
-
-            // In order to prevent a memory exhaustion attack we track transaction bytes used to create Block
-            // to see if we've exceeded any limits and if so clear out data and return.
-            uint64_t nTxSize = RecursiveDynamicUsage(tx);
-            uint64_t nCurrentMax = 0;
-            if (maxAllowedSize >= nTxSize)
-                nCurrentMax = maxAllowedSize - nTxSize;
-            if (thindata.AddThinBlockBytes(nTxSize, pfrom) > nCurrentMax)
-            {
-                LogPrint("thin", "xthin block too large %lu %llu %llu\n", pfrom->thinBlockHashes.size(), nTxSize,
-                    pfrom->nLocalThinBlockBytes);
-                LEAVE_CRITICAL_SECTION(cs_xval); // maintain locking order with vNodes
-                if (ClearLargestThinBlockAndDisconnect(pfrom))
-                {
-                    ENTER_CRITICAL_SECTION(cs_xval);
-                    return error("xthin block has exceeded memory limits of %ld bytes", maxAllowedSize);
-                }
-                ENTER_CRITICAL_SECTION(cs_xval);
-            }
-            if (pfrom->nLocalThinBlockBytes > nCurrentMax)
-            {
-                LogPrint("thin", "node %s xthin block is too large %lu %llu %llu\n", pfrom->GetLogName(),
-                    pfrom->thinBlockHashes.size(), nTxSize, pfrom->nLocalThinBlockBytes);
-                thindata.ClearThinBlockData(pfrom);
-                pfrom->fDisconnect = true;
-                return error("This thinblock has exceeded memory limits of %ld bytes", maxAllowedSize);
-            }
-
-            // This will push an empty/invalid transaction if we don't have it yet
-            pfrom->thinBlock.vtx.push_back(tx);
-        }
-    } // End locking cs_orphancache, mempool.cs and cs_xval
+        if (!ReconstructBlock(pfrom, fXVal, missingCount, unnecessaryCount))
+            return false;
+    }
 
     LogPrint("thin", "Got %d Re-requested txs, needed %d of them\n", thinBlockTx.vMissingTx.size(), count);
 
@@ -738,8 +627,8 @@ bool CXThinBlock::HandleMessage(CDataStream &vRecv, CNode *pfrom, string strComm
             if (!pfrom->mapThinBlocksInFlight.count(inv.hash) && !IsExpeditedNode(pfrom))
             {
                 Misbehaving(pfrom->GetId(), 10);
-                return error("%s %s from peer %s but was unrequested\n", strCommand, inv.hash.ToString(),
-                    pfrom->GetLogName());
+                return error(
+                    "%s %s from peer %s but was unrequested\n", strCommand, inv.hash.ToString(), pfrom->GetLogName());
             }
         }
     }
@@ -780,7 +669,6 @@ bool CXThinBlock::process(CNode *pfrom,
     pfrom->xThinBlockHashes = vTxHashes;
 
     thindata.AddThinBlockBytes(vTxHashes.size() * sizeof(uint64_t), pfrom); // start counting bytes
-    uint64_t maxAllowedSize = maxMessageSizeMultiplier * excessiveBlockSize;
 
     // Create the mapMissingTx from all the supplied tx's in the xthinblock
     BOOST_FOREACH (const CTransaction tx, vMissingTx)
@@ -842,7 +730,6 @@ bool CXThinBlock::process(CNode *pfrom,
 
         if (!collision)
         {
-
             // Start gathering the full tx hashes. If some are not available then add them to setHashesToRequest.
             uint256 nullhash;
             BOOST_FOREACH (const uint64_t &cheapHash, vTxHashes)
@@ -870,64 +757,8 @@ bool CXThinBlock::process(CNode *pfrom,
                 }
                 else
                 {
-                    // Look for each transaction in our various pools and buffers.
-                    // With xThinBlocks the vTxHashes contains only the first 8 bytes of the tx hash.
-                    BOOST_FOREACH (const uint256 hash, pfrom->thinBlockHashes)
-                    {
-                        // Replace the truncated hash with the full hash value if it exists
-                        CTransaction tx;
-                        if (!hash.IsNull())
-                        {
-                            bool inMemPool = mempool.lookup(hash, tx);
-                            bool inMissingTx = pfrom->mapMissingTx.count(hash.GetCheapHash()) > 0;
-                            bool inOrphanCache = mapOrphanTransactions.count(hash) > 0;
-
-                            if ((inMemPool && inMissingTx) || (inOrphanCache && inMissingTx))
-                                unnecessaryCount++;
-
-                            if (inOrphanCache)
-                            {
-                                tx = mapOrphanTransactions[hash].tx;
-                                setUnVerifiedOrphanTxHash.insert(hash);
-                            }
-                            else if (inMemPool && fXVal)
-                                setPreVerifiedTxHash.insert(hash);
-                            else if (inMissingTx)
-                                tx = pfrom->mapMissingTx[hash.GetCheapHash()];
-                        }
-                        if (tx.IsNull())
-                            missingCount++;
-
-                        // In order to prevent a memory exhaustion attack we track transaction bytes used to create Block
-                        // to see if we've exceeded any limits and if so clear out data and return.
-                        uint64_t nTxSize = RecursiveDynamicUsage(tx);
-                        uint64_t nCurrentMax = 0;
-                        if (maxAllowedSize >= nTxSize)
-                            nCurrentMax = maxAllowedSize - nTxSize;
-                        if (thindata.AddThinBlockBytes(nTxSize, pfrom) > nCurrentMax)
-                        {
-                            LogPrint("thin", "xthin block too large %lu %llu %llu\n", pfrom->thinBlockHashes.size(), nTxSize,
-                                pfrom->nLocalThinBlockBytes);
-                            LEAVE_CRITICAL_SECTION(cs_xval); // maintain locking order with vNodes
-                            if (ClearLargestThinBlockAndDisconnect(pfrom))
-                            {
-                                ENTER_CRITICAL_SECTION(cs_xval);
-                                return error("xthin block has exceeded memory limits of %ld bytes", maxAllowedSize);
-                            }
-                            ENTER_CRITICAL_SECTION(cs_xval);
-                        }
-                        if (pfrom->nLocalThinBlockBytes > nCurrentMax)
-                        {
-                            LogPrint("thin", "node %s xthin block is too large %lu %llu %llu\n", pfrom->GetLogName(),
-                                pfrom->thinBlockHashes.size(), nTxSize, pfrom->nLocalThinBlockBytes);
-                            thindata.ClearThinBlockData(pfrom);
-                            pfrom->fDisconnect = true;
-                            return error("This thinblock has exceeded memory limits of %ld bytes", maxAllowedSize);
-                        }
-
-                        // This will push an empty/invalid transaction if we don't have it yet
-                        pfrom->thinBlock.vtx.push_back(tx);
-                    }
+                    if (!ReconstructBlock(pfrom, fXVal, missingCount, unnecessaryCount))
+                        return false;
                 }
             }
         }
@@ -1001,6 +832,72 @@ bool CXThinBlock::process(CNode *pfrom,
     // Process the full block
     PV.HandleBlockMessage(pfrom, strCommand, pfrom->thinBlock, GetInv());
 
+    return true;
+}
+
+bool ReconstructBlock(CNode *pfrom, const bool fXVal, int &missingCount, int &unnecessaryCount)
+{
+    AssertLockHeld(cs_xval);
+    uint64_t maxAllowedSize = maxMessageSizeMultiplier * excessiveBlockSize;
+
+    // Look for each transaction in our various pools and buffers.
+    // With xThinBlocks the vTxHashes contains only the first 8 bytes of the tx hash.
+    BOOST_FOREACH (const uint256 hash, pfrom->thinBlockHashes)
+    {
+        // Replace the truncated hash with the full hash value if it exists
+        CTransaction tx;
+        if (!hash.IsNull())
+        {
+            bool inMemPool = mempool.lookup(hash, tx);
+            bool inMissingTx = pfrom->mapMissingTx.count(hash.GetCheapHash()) > 0;
+            bool inOrphanCache = mapOrphanTransactions.count(hash) > 0;
+
+            if ((inMemPool && inMissingTx) || (inOrphanCache && inMissingTx))
+                unnecessaryCount++;
+
+            if (inOrphanCache)
+            {
+                tx = mapOrphanTransactions[hash].tx;
+                setUnVerifiedOrphanTxHash.insert(hash);
+            }
+            else if (inMemPool && fXVal)
+                setPreVerifiedTxHash.insert(hash);
+            else if (inMissingTx)
+                tx = pfrom->mapMissingTx[hash.GetCheapHash()];
+        }
+        if (tx.IsNull())
+            missingCount++;
+
+        // In order to prevent a memory exhaustion attack we track transaction bytes used to create Block
+        // to see if we've exceeded any limits and if so clear out data and return.
+        uint64_t nTxSize = RecursiveDynamicUsage(tx);
+        uint64_t nCurrentMax = 0;
+        if (maxAllowedSize >= nTxSize)
+            nCurrentMax = maxAllowedSize - nTxSize;
+        if (thindata.AddThinBlockBytes(nTxSize, pfrom) > nCurrentMax)
+        {
+            LogPrint("thin", "xthin block too large %lu %llu %llu\n", pfrom->thinBlockHashes.size(), nTxSize,
+                pfrom->nLocalThinBlockBytes);
+            LEAVE_CRITICAL_SECTION(cs_xval); // maintain locking order with vNodes
+            if (ClearLargestThinBlockAndDisconnect(pfrom))
+            {
+                ENTER_CRITICAL_SECTION(cs_xval);
+                return error("xthin block has exceeded memory limits of %ld bytes", maxAllowedSize);
+            }
+            ENTER_CRITICAL_SECTION(cs_xval);
+        }
+        if (pfrom->nLocalThinBlockBytes > nCurrentMax)
+        {
+            LogPrint("thin", "node %s xthin block is too large %lu %llu %llu\n", pfrom->GetLogName(),
+                pfrom->thinBlockHashes.size(), nTxSize, pfrom->nLocalThinBlockBytes);
+            thindata.ClearThinBlockData(pfrom);
+            pfrom->fDisconnect = true;
+            return error("This thinblock has exceeded memory limits of %ld bytes", maxAllowedSize);
+        }
+
+        // This will push an empty/invalid transaction if we don't have it yet
+        pfrom->thinBlock.vtx.push_back(tx);
+    }
     return true;
 }
 

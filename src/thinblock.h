@@ -222,6 +222,7 @@ public:
 extern CThinBlockData thindata; // Singleton class
 
 
+bool ReconstructBlock(CNode *pfrom, const bool fXVal, int &missingCount, int &unnecessaryCount);
 bool HaveConnectThinblockNodes();
 bool HaveThinblockNodes();
 bool IsThinBlocksEnabled();
