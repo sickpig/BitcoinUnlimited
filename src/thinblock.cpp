@@ -136,7 +136,8 @@ bool CThinBlock::HandleMessage(CDataStream &vRecv, CNode *pfrom)
 
         ClearThinBlockInFlight(pfrom, inv.hash);
         thindata.ClearThinBlockData(pfrom);
-        LogPrint("thin", "Returning because we already have this block %s on disk, peer=%s\n", inv.hash.ToString(),
+        LogPrint("thin", "Received thinblock but returning because we already have this block %s on disk, peer=%s\n",
+            inv.hash.ToString(),
             pfrom->GetLogName());
         return true;
     }
@@ -190,7 +191,7 @@ bool CThinBlock::process(CNode *pfrom, int nSizeThinBlock)
             return false;
 
         pfrom->thinBlockWaitingForTxns = missingCount;
-        LogPrint("thin", "Thinblock %s waiting for: %d, unnecessary: %d, txs: %d full: %d\n",
+        LogPrint("thin", "Thinblock %s waiting for: %d, unnecessary: %d, total txns: %d received txns: %d\n",
             pfrom->thinBlock.GetHash().ToString(), pfrom->thinBlockWaitingForTxns, unnecessaryCount,
             pfrom->thinBlock.vtx.size(), pfrom->mapMissingTx.size());
     } // end lock cs_orphancache, mempool.cs, cs_xval
@@ -310,7 +311,7 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string 
     {
         LOCK(cs_main);
         Misbehaving(pfrom->GetId(), 100);
-        return error("Thinblock message received from a non thinblock node, peer=%d", pfrom->GetId());
+        return error("xblocktx message received from a non thinblock node, peer=%d", pfrom->GetId());
     }
 
     size_t msgSize = vRecv.size();
@@ -352,7 +353,8 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string 
 
         ClearThinBlockInFlight(pfrom, inv.hash);
         thindata.ClearThinBlockData(pfrom);
-        LogPrint("thin", "Returning because we already have this block %s on disk, peer=%s\n", inv.hash.ToString(),
+        LogPrint("thin", "Received xblocktx but returning because we already have this block %s on disk, peer=%s\n",
+            inv.hash.ToString(),
             pfrom->GetLogName());
         return true;
     }
@@ -468,7 +470,7 @@ bool CXRequestThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom)
     {
         LOCK(cs_main);
         Misbehaving(pfrom->GetId(), 100);
-        return error("Thinblock message received from a non thinblock node, peer=%d", pfrom->GetId());
+        return error("get_xblocktx message received from a non thinblock node, peer=%d", pfrom->GetId());
     }
 
     CXRequestThinBlockTx thinRequestBlockTx;
@@ -623,7 +625,8 @@ bool CXThinBlock::HandleMessage(CDataStream &vRecv, CNode *pfrom, string strComm
 
             ClearThinBlockInFlight(pfrom, thinBlock.header.GetHash());
             thindata.ClearThinBlockData(pfrom);
-            LogPrint("thin", "Returning because we already have block data %s from peer %s hop %d size %d bytes\n",
+            LogPrint("thin", "Received xthinblock but returning because we already have block data %s from peer %s hop"
+                             " %d size %d bytes\n",
                 inv.hash.ToString(), pfrom->GetLogName(), nHops, nSizeThinBlock);
             return true;
         }
@@ -815,7 +818,8 @@ bool CXThinBlock::process(CNode *pfrom,
     }
 
     pfrom->thinBlockWaitingForTxns = missingCount;
-    LogPrint("thin", "thinblock waiting for: %d, unnecessary: %d, txs: %d full: %d\n", pfrom->thinBlockWaitingForTxns,
+    LogPrint("thin", "xthinblock waiting for: %d, unnecessary: %d, total txns: %d received txns: %d\n",
+        pfrom->thinBlockWaitingForTxns,
         unnecessaryCount, pfrom->thinBlock.vtx.size(), pfrom->mapMissingTx.size());
 
     // If there are any missing hashes or transactions then we request them here.
@@ -846,7 +850,7 @@ bool CXThinBlock::process(CNode *pfrom,
     // We now have all the transactions now that are in this block
     pfrom->thinBlockWaitingForTxns = -1;
     int blockSize = pfrom->thinBlock.GetSerializeSize(SER_NETWORK, CBlock::CURRENT_VERSION);
-    LogPrint("thin", "Reassembled thin block for %s (%d bytes). Message was %d bytes, compression ratio %3.2f\n",
+    LogPrint("thin", "Reassembled xthinblock for %s (%d bytes). Message was %d bytes, compression ratio %3.2f\n",
         pfrom->thinBlock.GetHash().ToString(), blockSize, pfrom->nSizeThinBlock,
         ((float)blockSize) / ((float)pfrom->nSizeThinBlock));
 
