@@ -137,8 +137,7 @@ bool CThinBlock::HandleMessage(CDataStream &vRecv, CNode *pfrom)
         ClearThinBlockInFlight(pfrom, inv.hash);
         thindata.ClearThinBlockData(pfrom);
         LogPrint("thin", "Received thinblock but returning because we already have this block %s on disk, peer=%s\n",
-            inv.hash.ToString(),
-            pfrom->GetLogName());
+            inv.hash.ToString(), pfrom->GetLogName());
         return true;
     }
 
@@ -354,8 +353,7 @@ bool CXThinBlockTx::HandleMessage(CDataStream &vRecv, CNode *pfrom, std::string 
         ClearThinBlockInFlight(pfrom, inv.hash);
         thindata.ClearThinBlockData(pfrom);
         LogPrint("thin", "Received xblocktx but returning because we already have this block %s on disk, peer=%s\n",
-            inv.hash.ToString(),
-            pfrom->GetLogName());
+            inv.hash.ToString(), pfrom->GetLogName());
         return true;
     }
 
@@ -819,8 +817,7 @@ bool CXThinBlock::process(CNode *pfrom,
 
     pfrom->thinBlockWaitingForTxns = missingCount;
     LogPrint("thin", "xthinblock waiting for: %d, unnecessary: %d, total txns: %d received txns: %d\n",
-        pfrom->thinBlockWaitingForTxns,
-        unnecessaryCount, pfrom->thinBlock.vtx.size(), pfrom->mapMissingTx.size());
+        pfrom->thinBlockWaitingForTxns, unnecessaryCount, pfrom->thinBlock.vtx.size(), pfrom->mapMissingTx.size());
 
     // If there are any missing hashes or transactions then we request them here.
     // This must be done outside of the mempool.cs lock or may deadlock.
@@ -880,7 +877,7 @@ static bool ReconstructBlock(CNode *pfrom, const bool fXVal, int &missingCount, 
 
             LOCK(cs_main);
             Misbehaving(pfrom->GetId(), 10);
-            return error("Repeating Transaction Id sequence, peer=%d", pfrom->GetId());
+            return error("Repeating Transaction Id sequence, peer=%s", pfrom->GetLogName());
         }
     }
 
@@ -920,26 +917,28 @@ static bool ReconstructBlock(CNode *pfrom, const bool fXVal, int &missingCount, 
             nCurrentMax = maxAllowedSize - nTxSize;
         if (thindata.AddThinBlockBytes(nTxSize, pfrom) > nCurrentMax)
         {
-            LogPrint("thin", "xthin block too large %lu %llu %llu\n", pfrom->thinBlockHashes.size(), nTxSize,
-                pfrom->nLocalThinBlockBytes);
             LEAVE_CRITICAL_SECTION(cs_xval); // maintain locking order with vNodes
             if (ClearLargestThinBlockAndDisconnect(pfrom))
             {
                 ENTER_CRITICAL_SECTION(cs_xval);
-                return error("xthin block has exceeded memory limits of %ld bytes", maxAllowedSize);
+                return error(
+                    "Reconstructed block %s (size:%llu) has caused max memory limit %llu bytes to be exceeded, peer=%s",
+                    pfrom->thinBlock.GetHash().ToString(), pfrom->nLocalThinBlockBytes, maxAllowedSize,
+                    pfrom->GetLogName());
             }
             ENTER_CRITICAL_SECTION(cs_xval);
         }
         if (pfrom->nLocalThinBlockBytes > nCurrentMax)
         {
-            LogPrint("thin", "node %s xthin block is too large %lu %llu %llu\n", pfrom->GetLogName(),
-                pfrom->thinBlockHashes.size(), nTxSize, pfrom->nLocalThinBlockBytes);
             thindata.ClearThinBlockData(pfrom);
             pfrom->fDisconnect = true;
-            return error("This thinblock has exceeded memory limits of %ld bytes", maxAllowedSize);
+            return error(
+                "Reconstructed block %s (size:%llu) has caused max memory limit %llu bytes to be exceeded, peer=%s",
+                pfrom->thinBlock.GetHash().ToString(), pfrom->nLocalThinBlockBytes, maxAllowedSize,
+                pfrom->GetLogName());
         }
 
-        // This will push an empty/invalid transaction if we don't have it yet
+        // Add this transaction. If the tx is null we still add it as a placeholder to keep the correct ordering.
         pfrom->thinBlock.vtx.push_back(tx);
     }
     return true;
