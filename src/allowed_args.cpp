@@ -30,7 +30,7 @@
 #endif
 
 // These globals are needed here so bitcoin-cli can link
-const std::string CURRENCY_UNIT = "BTC";
+const std::string CURRENCY_UNIT = "BCC";
 const std::string DEFAULT_TOR_CONTROL = "127.0.0.1:9051";
 const char DEFAULT_RPCCONNECT[] = "127.0.0.1";
 
