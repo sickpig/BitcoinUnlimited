@@ -6,7 +6,6 @@
 #ifndef BITCOIN_UNLIMITED_H
 #define BITCOIN_UNLIMITED_H
 
-#include "buip055fork.h"
 #include "chain.h"
 #include "checkqueue.h"
 #include "clientversion.h"
@@ -24,6 +23,7 @@
 #include <list>
 #include <vector>
 
+#include "buip055fork.h"
 enum
 {
     TYPICAL_BLOCK_SIZE = 200000, // used for initial buffer size
