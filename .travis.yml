@@ -4,7 +4,9 @@ dist: trusty
 #workaround for https://github.com/travis-ci/travis-ci/issues/5227
 addons:
   hostname: bitcoin-tester
-
+  apt:
+    sources: ['ubuntu-toolchain-r-test']
+    packages: [g++-5]
 os: linux
 language: generic
 cache:
@@ -28,7 +30,7 @@ env:
     - WINEDEBUG=fixme-all
   matrix:
 # bitcoind
-    - HOST=x86_64-unknown-linux-gnu PACKAGES="bc python3-zmq openjdk-7-jre-headless clang-format-3.8" DEP_OPTS="NO_QT=1 NO_UPNP=1 DEBUG=1" RUN_TESTS=true RUN_FORMATTING_CHECK=true GOAL="install" BITCOIN_CONFIG="--enable-zmq --enable-glibc-back-compat --enable-reduce-exports CPPFLAGS=-DDEBUG_LOCKORDER"  
+    - COMPILER_NAME=gcc CXX=g++-5 CC=gcc-5 HOST=x86_64-unknown-linux-gnu PACKAGES="bc python3-zmq openjdk-7-jre-headless clang-format-3.8" DEP_OPTS="NO_QT=1 NO_UPNP=1 DEBUG=1" RUN_TESTS=true RUN_FORMATTING_CHECK=true GOAL="install" BITCOIN_CONFIG="--enable-zmq --enable-glibc-back-compat --enable-reduce-exports CPPFLAGS=-DDEBUG_LOCKORDER"
 # ARM64
     - HOST=aarch64-linux-gnu PACKAGES="g++-aarch64-linux-gnu" DEP_OPTS="NO_QT=1" GOAL="install" BITCOIN_CONFIG="--enable-glibc-back-compat --enable-reduce-exports"
 # ARMHF
