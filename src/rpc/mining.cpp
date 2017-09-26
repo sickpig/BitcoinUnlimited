@@ -720,7 +720,7 @@ UniValue submitblock(const UniValue& params, bool fHelp)
             + HelpExampleCli("submitblock", "\"mydata\"")
             + HelpExampleRpc("submitblock", "\"mydata\"")
         );
-
+printf("submit block 1\n");
     CBlock block;
     if (!DecodeHexBlk(block, params[0].get_str()))
         throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Block decode failed");
@@ -741,6 +741,7 @@ UniValue submitblock(const UniValue& params, bool fHelp)
         }
     }
 
+printf("submit block 2\n");
     CValidationState state;
     submitblock_StateCatcher sc(block.GetHash());
     LogPrint("rpc", "Received block %s via RPC.\n", block.GetHash().ToString());
@@ -757,8 +758,10 @@ UniValue submitblock(const UniValue& params, bool fHelp)
     // Unless they have more work than our own block or are processing a chain
     // that has more work than our block.
     PV->StopAllValidationThreads(block.GetBlockHeader().nBits);
+printf("submit block 3\n");
 
     bool fAccepted = ProcessNewBlock(state, Params(), NULL, &block, true, NULL, false);
+printf("submit block 4\n");
     UnregisterValidationInterface(&sc);
     if (fBlockPresent)
     {
@@ -772,6 +775,8 @@ UniValue submitblock(const UniValue& params, bool fHelp)
             return "inconclusive";
         state = sc.state;
     }
+printf("submit block 5\n");
+
     return BIP22ValidationResult(state);
 }
 
