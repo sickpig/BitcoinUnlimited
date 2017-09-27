@@ -504,8 +504,9 @@ public:
             msg.SetVersion(nVersionIn);
     }
 
-    const CMessageHeader::MessageStartChars &GetMagic(const CChainParams &params) const
+    const CMessageHeader::MessageStartChars &GetMagic(const CChainParams &params, uint32_t f) const
     {
+        LogPrintf("peer=%d - fUsesCashMagic inside GetMagic: %d (%d) \n", id, (uint8_t)fUsesCashMagic, f);
         return fUsesCashMagic ? params.CashMessageStart() : params.MessageStart();
     }
 

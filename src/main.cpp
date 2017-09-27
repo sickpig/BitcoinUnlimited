@@ -7146,9 +7146,15 @@ bool ProcessMessages(CNode *pfrom)
         CNetMessage &msg = *it;
 
         // if (fDebug)
-        //    LogPrintf("%s(message %u msgsz, %u bytes, complete:%s)\n", __func__,
-        //            msg.hdr.nMessageSize, msg.vRecv.size(),
-        //            msg.complete() ? "Y" : "N");
+            LogPrintf("%s(message %u msgsz, %u bytes, complete:%s) - commnand: %s - checksum %d, magic %x - %x - %x - %x \n", __func__,
+                    msg.hdr.nMessageSize, msg.vRecv.size(),
+                    msg.complete() ? "Y" : "N",
+                    SanitizeString(msg.hdr.GetCommand()),
+                    msg.hdr.nChecksum,
+                    msg.hdr.pchMessageStart[0],
+                    msg.hdr.pchMessageStart[1],
+                    msg.hdr.pchMessageStart[2],
+                    msg.hdr.pchMessageStart[3]);
 
         // end, if an incomplete message is found
         if (!msg.complete())
@@ -7157,20 +7163,30 @@ bool ProcessMessages(CNode *pfrom)
         // at this point, any failure means we can delete the current message
         it++;
 
+        // Read header
+        CMessageHeader &hdr = msg.hdr;
+
 #ifdef BITCOIN_CASH
         // This is a new peer. Before doing anything, we need to detect what magic the peer is using.
+        LogPrintf("peer=%d (%d) - peer magic before cmp1: %x - %x - %x - %x \n", pfrom->id, hdr.nChecksum, hdr.pchMessageStart[0], hdr.pchMessageStart[1], hdr.pchMessageStart[2], hdr.pchMessageStart[3]);
         if (pfrom->nVersion == 0 &&
-            memcmp(msg.hdr.pchMessageStart, chainparams.CashMessageStart(), MESSAGE_START_SIZE) == 0)
+            memcmp(hdr.pchMessageStart, chainparams.CashMessageStart(), MESSAGE_START_SIZE) == 0)
         {
             pfrom->fUsesCashMagic = true;
+            LogPrintf("peer=%d (%d) - we just set fUsesCashMagic to 1 \n", pfrom->id, hdr.nChecksum );
         }
+        LogPrintf("peer=%d (%d)- peer magic after cmp1: %x - %x - %x - %x \n", pfrom->id, hdr.nChecksum, hdr.pchMessageStart[0], hdr.pchMessageStart[1], hdr.pchMessageStart[2], hdr.pchMessageStart[3]);
 #endif
 
+        LogPrintf("peer=%d (%d)- peer magic before cmp2: %x - %x - %x - %x \n", pfrom->id, hdr.nChecksum, hdr.pchMessageStart[0], hdr.pchMessageStart[1], hdr.pchMessageStart[2], hdr.pchMessageStart[3]);
         // Scan for message start
-        if (memcmp(msg.hdr.pchMessageStart, pfrom->GetMagic(chainparams), MESSAGE_START_SIZE) != 0)
+        if (memcmp(hdr.pchMessageStart, pfrom->GetMagic(chainparams, hdr.nChecksum) , MESSAGE_START_SIZE) != 0)
         {
-            LogPrintf("PROCESSMESSAGE: INVALID MESSAGESTART %s peer=%d ip=%s\n", SanitizeString(msg.hdr.GetCommand()),
-                pfrom->id, pfrom->addrName.c_str());
+            LogPrintf("peer=%d (%d) - fUsesCashMagic after GetMagic %d\n", pfrom->id, hdr.nChecksum, (uint8_t)pfrom->fUsesCashMagic);
+            LogPrintf("peer=%d (%d) - expected magic: %x - %x - %x - %x \n", pfrom->id, hdr.nChecksum, pfrom->GetMagic(chainparams, hdr.nChecksum)[0], pfrom->GetMagic(chainparams,hdr.nChecksum)[1], pfrom->GetMagic(chainparams, hdr.nChecksum)[2], pfrom->GetMagic(chainparams, hdr.nChecksum)[3]);
+            LogPrintf("peer=%d (%d) - peer magic after cmp2: %x - %x - %x - %x \n", pfrom->id, hdr.nChecksum, hdr.pchMessageStart[0], hdr.pchMessageStart[1], hdr.pchMessageStart[2], hdr.pchMessageStart[3]);
+            LogPrintf("PROCESSMESSAGE: INVALID MESSAGESTART %s peer=%d (%d) ip=%s\n", SanitizeString(hdr.GetCommand()), pfrom->id, hdr.nChecksum,
+                pfrom->addrName.c_str());
             if (!pfrom->fWhitelisted)
             {
                 dosMan.Ban(pfrom->addr, BanReasonNodeMisbehaving, 4 * 60 * 60); // ban for 4 hours
@@ -7180,8 +7196,8 @@ bool ProcessMessages(CNode *pfrom)
         }
 
         // Read header
-        CMessageHeader &hdr = msg.hdr;
-        if (!hdr.IsValid(pfrom->GetMagic(chainparams)))
+        // CMessageHeader &hdr = msg.hdr;
+        if (!hdr.IsValid(pfrom->GetMagic(chainparams, msg.hdr.nChecksum)))
         {
             LogPrintf("PROCESSMESSAGE: ERRORS IN HEADER %s peer=%d\n", SanitizeString(hdr.GetCommand()), pfrom->id);
             continue;
