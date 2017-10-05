@@ -4275,7 +4275,7 @@ static bool AcceptBlock(const CBlock &block,
         if (!FindBlockPos(state, blockPos, nBlockSize + 8, nHeight, block.GetBlockTime(), dbp != NULL))
             return error("AcceptBlock(): FindBlockPos failed");
         if (dbp == NULL)
-            if (!WriteBlockToDisk(block, blockPos, chainparams.MessageStart()))
+            if (!WriteBlockToDisk(block, blockPos, chainparams.MessageStart())) //FIXME do we have to use GetMagic?
                 AbortNode(state, "Failed to write block");
         if (!ReceivedBlockTransactions(block, state, pindex, blockPos))
             return error("AcceptBlock(): ReceivedBlockTransactions failed");
@@ -4990,12 +4990,12 @@ bool LoadExternalBlockFile(const CChainParams &chainparams, FILE *fileIn, CDiskB
             {
                 // locate a header
                 unsigned char buf[MESSAGE_START_SIZE];
-                blkdat.FindByte(chainparams.MessageStart()[0]);
+                blkdat.FindByte(chainparams.MessageStart()[0]); // FIXME do we have to use GetMagic?
                 // FindByte peeks 1 ahead and locates the file pointer AT the byte, not at the next one as is typical
                 // for file ops.  So if we rewind, we want to go one further.
                 nRewind = blkdat.GetPos() + 1;
                 blkdat >> FLATDATA(buf);
-                if (memcmp(buf, chainparams.MessageStart(), MESSAGE_START_SIZE))
+                if (memcmp(buf, chainparams.MessageStart(), MESSAGE_START_SIZE)) // FIXME do we have to use GetMagic?
                     continue;
                 // read size
                 // BU NOTE: if we ever get to 4GB blocks the block size data structure will overflow since this is
