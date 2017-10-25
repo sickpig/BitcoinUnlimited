@@ -252,9 +252,10 @@ UniValue gettxoutproof(const UniValue& params, bool fHelp)
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
         pblockindex = mapBlockIndex[hashBlock];
     } else {
-        CCoins coins;
-        if (pcoinsTip->GetCoins(oneTxid, coins) && coins.nHeight > 0 && coins.nHeight <= chainActive.Height())
-            pblockindex = chainActive[coins.nHeight];
+        const Coin& coin = AccessByTxid(*pcoinsTip, oneTxid);
+        if (!coin.IsSpent() && coin.nHeight > 0 && coin.nHeight <= chainActive.Height()) {
+            pblockindex = chainActive[coin.nHeight];
+        }
     }
 
     if (pblockindex == NULL)
@@ -639,10 +640,8 @@ UniValue signrawtransaction(const UniValue& params, bool fHelp)
         CCoinsViewMemPool viewMempool(&viewChain, mempool);
         view.SetBackend(viewMempool); // temporarily switch cache backend to db+mempool view
 
-        // Bring the coins into the cache
-        BOOST_FOREACH(const CTxIn& txin, mergedTx.vin)
-        {
-            CCoinsAccessor coins(view, txin.prevout.hash);
+        BOOST_FOREACH(const CTxIn& txin, mergedTx.vin) {
+            view.AccessCoin(txin.prevout); // Load entries from viewChain into view; can fail.
         }
 
         view.SetBackend(viewDummy); // switch back to avoid locking mempool for too long
@@ -688,38 +687,26 @@ UniValue signrawtransaction(const UniValue& params, bool fHelp)
             if (nOut < 0)
                 throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "vout must be positive");
 
-            vector<unsigned char> pkData(ParseHexO(prevOut, "scriptPubKey"));
+            COutPoint out(txid, nOut);
+            std::vector<unsigned char> pkData(ParseHexO(prevOut, "scriptPubKey"));
             CScript scriptPubKey(pkData.begin(), pkData.end());
 
             {
-                CCoinsModifier coins;
-                view.ModifyCoins(txid, coins);
-                if (coins->IsAvailable(nOut) && coins->vout[nOut].scriptPubKey != scriptPubKey) {
-                    string err("Previous output scriptPubKey mismatch:\n");
-                    err = err + ScriptToAsmStr(coins->vout[nOut].scriptPubKey) + "\nvs:\n"+
+                const Coin& coin = view.AccessCoin(out);
+                if (!coin.IsSpent() && coin.out.scriptPubKey != scriptPubKey) {
+                    std::string err("Previous output scriptPubKey mismatch:\n");
+                    err = err + ScriptToAsmStr(coin.out.scriptPubKey) + "\nvs:\n"+
                         ScriptToAsmStr(scriptPubKey);
                     throw JSONRPCError(RPC_DESERIALIZATION_ERROR, err);
                 }
-                if ((unsigned int)nOut >= coins->vout.size())
-                    coins->vout.resize(nOut+1);
-                coins->vout[nOut].scriptPubKey = scriptPubKey;
-                if (prevOut.exists("amount")) // From bitcoin-abc
-                {
-                    coins->vout[nOut].nValue = AmountFromValue(find_value(prevOut, "amount"));
-                    if (!MoneyRange(coins->vout[nOut].nValue))
-                    {
-                        // 'amount' param is not a valid money range, so error
-                        throw JSONRPCError(RPC_INVALID_PARAMETER, strprintf("amount on prevtx #%d, vout %d out of range", int(idx), nOut));
-                    }
+                Coin newcoin;
+                newcoin.out.scriptPubKey = scriptPubKey;
+                newcoin.out.nValue = 0;
+                if (prevOut.exists("amount")) {
+                    newcoin.out.nValue = AmountFromValue(find_value(prevOut, "amount"));
                 }
-                else
-                {
-#ifdef BITCOIN_CASH
-                    throw JSONRPCError(RPC_INVALID_PARAMETER, "Missing amount");
-#else
-                    coins->vout[nOut].nValue = 0; // we don't know the actual output value
-#endif
-                }
+                newcoin.nHeight = 1;
+                view.AddCoin(out, std::move(newcoin), true);
             }
 
             // if redeemScript given and not using the local wallet (private keys
@@ -800,19 +787,14 @@ UniValue signrawtransaction(const UniValue& params, bool fHelp)
     for (unsigned int i = 0; i < mergedTx.vin.size(); i++)
     {
         CTxIn& txin = mergedTx.vin[i];
-        CScript prevPubKey;
-        CAmount amount;
-        {
-            CCoinsAccessor coins(view, txin.prevout.hash);
-            if (!coins || !coins->IsAvailable(txin.prevout.n))
-            {
-                TxInErrorToJSON(txin, vErrors, "Input not found or already spent");
-                continue;
-            }
-            prevPubKey = coins->vout[txin.prevout.n].scriptPubKey;
-            amount = coins->vout[txin.prevout.n].nValue;
+       const Coin& coin = view.AccessCoin(txin.prevout);
+        if (coin.IsSpent()) {
+            TxInErrorToJSON(txin, vErrors, "Input not found or already spent");
+            continue;
         }
-        txin.scriptSig.clear();
+        const CScript& prevPubKey = coin.out.scriptPubKey;
+        const CAmount& amount = coin.out.nValue;
+
         // Only sign SIGHASH_SINGLE if there's a corresponding output:
         if (!fHashSingle || (i < mergedTx.vout.size()))
             SignSignature(keystore, prevPubKey, mergedTx, i, amount, nHashType);
@@ -890,13 +872,12 @@ UniValue sendrawtransaction(const UniValue& params, bool fHelp)
 
     CCoinsViewCache &view = *pcoinsTip;
     bool fHaveChain = false;
-    {
-        CCoinsAccessor existingCoins(view,hashTx);
-        fHaveChain = existingCoins && existingCoins->nHeight < 1000000000;
+    for (size_t o = 0; !fHaveChain && o < tx.vout.size(); o++) {
+        const Coin& existingCoin = view.AccessCoin(COutPoint(hashTx, o));
+        fHaveChain = !existingCoin.IsSpent();
     }
     bool fHaveMempool = mempool.exists(hashTx);
-    if (!fHaveMempool && !fHaveChain)
-    {
+    if (!fHaveMempool && !fHaveChain) {
         // push to local node and sync with wallets
         CValidationState state;
         bool fMissingInputs = false;

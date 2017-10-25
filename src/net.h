@@ -11,6 +11,8 @@
 #include "fastfilter.h"
 #include "chainparams.h"
 #include "compat.h"
+#include "fs.h"
+#include "hash.h"
 #include "limitedmap.h"
 #include "netbase.h"
 #include "primitives/block.h"
@@ -28,8 +30,6 @@
 #include <arpa/inet.h>
 #endif
 
-#include <boost/lockfree/queue.hpp>
-#include <boost/filesystem/path.hpp>
 #include <boost/foreach.hpp>
 #include <boost/signals2/signal.hpp>
 
@@ -565,7 +565,7 @@ public:
     // BUIP010:
     bool ThinBlockCapable()
     {
-        if ((nServices & NODE_XTHIN) && (nServices & NODE_BLOOM))
+        if (nServices & NODE_XTHIN)
             return true;
         return false;
     }

@@ -68,6 +68,8 @@
 #endif
 #endif
 
+extern std::atomic<bool> fRescan;
+
 using namespace std;
 
 extern bool ProcessMessages(CNode *pfrom);
@@ -548,7 +550,7 @@ bool CNode::ReceiveMsgBytes(const char *pch, unsigned int nBytes)
     {
         // get current incomplete message, or create a new one
         if (vRecvMsg.empty() || vRecvMsg.back().complete())
-            vRecvMsg.push_back(CNetMessage(Params().MessageStart(), SER_NETWORK, nRecvVersion));
+            vRecvMsg.push_back(CNetMessage(GetMagic(Params()), SER_NETWORK, nRecvVersion));
 
         CNetMessage &msg = vRecvMsg.back();
 
@@ -599,14 +601,12 @@ bool CNode::ReceiveMsgBytes(const char *pch, unsigned int nBytes)
                     strCommand == NetMsgType::XTHINBLOCK || strCommand == NetMsgType::THINBLOCK ||
                     strCommand == NetMsgType::XBLOCKTX || strCommand == NetMsgType::GET_XBLOCKTX)
                 {
-                    // Temporarely disabled cause it probably trigs a validation error. Quoting ptschip
-                    // from BU slack: "this routine should be optimized anyway, it involves a copy opertaion...
-                    // it would be better to just swap pointers somehow...perhaps create a fake txn and push
-                    // it to the front, then swap the pointer with the xthin at the back, then delete the back
-                    // entry...that probbly would be much more efficient."
-                    //vRecvMsg.push_front(msg);
-                    //vRecvMsg.pop_back();
-                    //LogPrint("thin", "Receive Queue: pushed %s to the front of the queue\n", strCommand);
+                   // Move the this last message to the front of the queue.
+                    std::rotate(vRecvMsg.begin(), vRecvMsg.end() - 1, vRecvMsg.end());
+
+                    std::string strFirstMsgCommand = vRecvMsg[0].hdr.GetCommand();
+                    DbgAssert(strFirstMsgCommand == strCommand, );
+                    LogPrint("thin", "Receive Queue: pushed %s to the front of the queue\n", strFirstMsgCommand);
                 }
             }
             // BU: end
@@ -898,6 +898,10 @@ static bool AttemptToEvictConnection(bool fPreferNewConnection)
 
 static void AcceptConnection(const ListenSocket &hListenSocket)
 {
+    // If a wallet rescan has started then do not accept any more connections until the rescan has completed.
+    if (fRescan)
+        return;
+
     struct sockaddr_storage sockaddr;
     socklen_t len = sizeof(sockaddr);
     SOCKET hSocket = accept(hListenSocket.socket, (struct sockaddr *)&sockaddr, &len);
@@ -2902,18 +2906,8 @@ void CNode::BeginMessage(const char *pszCommand) EXCLUSIVE_LOCK_FUNCTION(cs_vSen
 {
     ENTER_CRITICAL_SECTION(cs_vSend);
     assert(ssSend.size() == 0);
-    const CMessageHeader::MessageStartChars *start = &Params().MessageStart();
-    CMessageHeader::MessageStartChars temp;
-    if (netMagic.value!=0)
-        {
-            temp[0] = netMagic.value&255;
-            temp[1] = (netMagic.value>>8)&255;
-            temp[2] = (netMagic.value>>16)&255;
-            temp[3] = (netMagic.value>>24)&255;
-            start = &temp;
-        }
-    ssSend << CMessageHeader(*start, pszCommand, 0);
-    LogPrint("net", "sending: %s\n", SanitizeString(pszCommand));
+    ssSend << CMessageHeader(GetMagic(Params()), pszCommand, 0);
+    LogPrint("net", "sending: %s ", SanitizeString(pszCommand));
     currentCommand = pszCommand;
 }
 

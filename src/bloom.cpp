@@ -25,9 +25,7 @@ extern uint32_t nXthinBloomFilterSize;
 
 using namespace std;
 
-void CBloomFilter::setup(unsigned int nElements, double nFPRate, unsigned int nTweakIn, unsigned char nFlagsIn, bool size_constrained, uint32_t nMaxFilterSize)
-{
-    if (nMaxFilterSize == 0)  nMaxFilterSize=nXthinBloomFilterSize;
+void CBloomFilter::setup(unsigned int nElements, double nFPRate, unsigned int nTweakIn, unsigned char nFlagsIn, bool size_constrained, uint32_t nMaxFilterSize = SMALLEST_MAX_BLOOM_FILTER_SIZE) {
     if (nElements == 0) {
         LogPrintf("Construction of empty CBloomFilter attempted.\n");
         nElements = 1;
@@ -139,7 +137,7 @@ void CBloomFilter::reset(unsigned int nNewTweak)
 
 bool CBloomFilter::IsWithinSizeConstraints() const
 {
-    return vData.size() <= nXthinBloomFilterSize && nHashFuncs <= MAX_HASH_FUNCS;
+    return vData.size() <= SMALLEST_MAX_BLOOM_FILTER_SIZE && nHashFuncs <= MAX_HASH_FUNCS;
 }
 
 bool CBloomFilter::IsRelevantAndUpdate(const CTransaction& tx)
