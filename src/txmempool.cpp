@@ -1089,6 +1089,7 @@ void CTxMemPool::PrioritiseTransaction(const uint256 hash,
             {
                 mapTx.modify(ancestorIt, update_descendant_state(0, nFeeDelta, 0));
             }
+            ++nTransactionsUpdated;
         }
     }
     LOGA("PrioritiseTransaction: %s priority += %f, fee += %d\n", strHash, dPriorityDelta, FormatMoney(nFeeDelta));
