@@ -59,6 +59,7 @@ script: |
 
   # Create per-host faketime wrappers
   for i in $HOSTS; do
+    sudo update-alternatives --set $i-g++ $(which $i-g++-posix);
     for prog in ${FAKETIME_HOST_PROGS}; do
         echo '#!/bin/bash' > ${WRAP_DIR}/${i}-${prog}
         echo "REAL=\`which -a ${i}-${prog} | grep -v ${WRAP_DIR}/${i}-${prog} | head -1\`" >> ${WRAP_DIR}/${i}-${prog}
