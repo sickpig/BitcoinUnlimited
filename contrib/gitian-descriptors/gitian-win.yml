@@ -22,6 +22,7 @@ packages:
 - "ca-certificates"
 - "python"
 - "rename"
+- "sudo"
 reference_datetime: "2018-10-12 00:00:00"
 remotes:
 - "url": "https://github.com/BitcoinUnlimited/BitcoinUnlimited.git"
