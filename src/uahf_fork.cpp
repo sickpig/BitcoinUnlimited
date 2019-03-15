@@ -15,7 +15,6 @@
 
 bool IsTxProbablyNewSigHash(const CTransaction &tx)
 {
-    // bool newsighash = false;
     bool oldsighash = false;
     for (auto txin : tx.vin)
     {
@@ -26,14 +25,8 @@ bool IsTxProbablyNewSigHash(const CTransaction &tx)
         {
             if (!data.empty())
             {
-                if (data.back() & SIGHASH_FORKID)
-                {
-                    // newsighash = true;
-                }
-                else
-                {
-                    oldsighash = true;
-                }
+                if
+                    !(data.back() & SIGHASH_FORKID) { oldsighash = true; }
             }
         }
     }
@@ -44,7 +37,6 @@ bool IsTxUAHFOnly(const CTxMemPoolEntry &txentry)
 {
     if ((txentry.sighashType & SIGHASH_FORKID) || (txentry.sighashType == 0))
     {
-        // LOGA("txn is UAHF-specific\n");
         return true;
     }
     return false;
