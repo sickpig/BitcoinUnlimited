@@ -597,10 +597,7 @@ bool ParallelAcceptToMemoryPool(Snapshot &ss,
 
     const CChainParams &chainparams = Params();
 
-    const uint32_t cds_flag =
-        (AreWeOnBCHChain() && IsNov152018Activated(chainparams.GetConsensus(), chainActive.Tip())) ?
-            SCRIPT_ENABLE_CHECKDATASIG :
-            0;
+    const uint32_t cds_flag = (AreWeOnBCHChain()) ? SCRIPT_ENABLE_CHECKDATASIG : 0;
     const uint32_t svflag = (AreWeOnSVChain() && IsSv2018Activated(chainparams.GetConsensus(), chainActive.Tip())) ?
                                 SCRIPT_ENABLE_MUL_SHIFT_INVERT_OPCODES :
                                 0;
@@ -655,7 +652,7 @@ bool ParallelAcceptToMemoryPool(Snapshot &ss,
     }
 
     // Make sure tx size is acceptable after Nov 15, 2018 fork
-    if (AreWeOnBCHChain() && IsNov152018Activated(chainparams.GetConsensus(), chainActive.Tip()))
+    if (AreWeOnBCHChain())
     {
         if (tx->GetTxSize() < MIN_TX_SIZE)
             return state.DoS(0, false, REJECT_INVALID, "txn-undersize");
