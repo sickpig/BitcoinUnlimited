@@ -25,7 +25,7 @@ extern void LimitMempoolSize(CTxMemPool &pool, size_t limit, unsigned long age);
 
 BOOST_AUTO_TEST_SUITE(txvalidationcache_tests) // BU harmonize suite name with filename
 
-static bool ToMemPool(CMutableTransaction &tx)
+static bool ToMemPool(const CTransaction &tx)
 {
     LOCK(cs_main);
 

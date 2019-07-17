@@ -142,7 +142,7 @@ CMutableTransaction BuildCreditingTransaction(const CScript &scriptPubKey, CAmou
     return txCredit;
 }
 
-CMutableTransaction BuildSpendingTransaction(const CScript &scriptSig, const CMutableTransaction &txCredit)
+CMutableTransaction BuildSpendingTransaction(const CScript &scriptSig, const CTransaction &txCredit)
 {
     CMutableTransaction txSpend;
     txSpend.nVersion = 1;
@@ -169,7 +169,7 @@ void DoTest(const CScript &scriptPubKey,
     bool expect = (scriptError == SCRIPT_ERR_OK);
 
     ScriptError err;
-    CMutableTransaction txCredit = BuildCreditingTransaction(scriptPubKey, nValue);
+    const CTransaction txCredit = BuildCreditingTransaction(scriptPubKey, nValue);
     CMutableTransaction tx = BuildSpendingTransaction(scriptSig, txCredit);
     CMutableTransaction tx2 = tx;
     bool result = VerifyScript(scriptSig, scriptPubKey, flags, MAX_OPS_PER_SCRIPT,
@@ -1911,7 +1911,7 @@ BOOST_AUTO_TEST_CASE(script_CHECKMULTISIG12)
     scriptPubKey12 << OP_1 << ToByteVector(key1.GetPubKey()) << ToByteVector(key2.GetPubKey()) << OP_2
                    << OP_CHECKMULTISIG;
 
-    CMutableTransaction txFrom12 = BuildCreditingTransaction(scriptPubKey12, 1);
+    const CTransaction txFrom12 = BuildCreditingTransaction(scriptPubKey12, 1);
     CMutableTransaction txTo12 = BuildSpendingTransaction(CScript(), txFrom12);
 
     CScript goodsig1 = sign_multisig(scriptPubKey12, key1, CTransaction(txTo12), txFrom12.vout[0].nValue);
@@ -1947,7 +1947,7 @@ BOOST_AUTO_TEST_CASE(script_CHECKMULTISIG23)
     scriptPubKey23 << OP_2 << ToByteVector(key1.GetPubKey()) << ToByteVector(key2.GetPubKey())
                    << ToByteVector(key3.GetPubKey()) << OP_3 << OP_CHECKMULTISIG;
 
-    CMutableTransaction txFrom23 = BuildCreditingTransaction(scriptPubKey23, 0);
+    const CTransaction txFrom23 = BuildCreditingTransaction(scriptPubKey23, 0);
     CMutableTransaction txTo23 = BuildSpendingTransaction(CScript(), txFrom23);
 
     std::vector<CKey> keys;
