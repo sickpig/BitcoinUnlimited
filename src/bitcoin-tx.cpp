@@ -454,12 +454,10 @@ static void MutateTxSign(CMutableTransaction &tx, const string &flagStr)
         if (!findSighashFlags(nHashType, flagStr))
             throw runtime_error("unknown sighash flag/sign option");
 
-    vector<CTransaction> txVariants;
-    txVariants.push_back(tx);
-
     // mergedTx will end up with all the signatures; it
     // starts as a clone of the raw tx:
-    CMutableTransaction mergedTx(txVariants[0]);
+    CMutableTransaction mergedTx(tx);
+    const CTransaction txv{tx};
     bool fComplete = true;
     CCoinsView viewDummy;
     CCoinsViewCache view(&viewDummy);
@@ -549,7 +547,7 @@ static void MutateTxSign(CMutableTransaction &tx, const string &flagStr)
     // Sign what we can:
     for (unsigned int i = 0; i < mergedTx.vin.size(); i++)
     {
-        CTxIn &txin = mergedTx.vin[i];
+        const CTxIn &txin = mergedTx.vin[i];
         CoinModifier coin(view, txin.prevout);
         if (coin->IsSpent())
         {
@@ -565,11 +563,8 @@ static void MutateTxSign(CMutableTransaction &tx, const string &flagStr)
             SignSignature(keystore, prevPubKey, mergedTx, i, amount, nHashType);
 
         // ... and merge in other signatures:
-        for (const CTransaction &txv : txVariants)
-        {
-            txin.scriptSig = CombineSignatures(prevPubKey, MutableTransactionSignatureChecker(&mergedTx, i, amount),
-                txin.scriptSig, txv.vin[i].scriptSig);
-        }
+        txin.scriptSig = CombineSignatures(
+            prevPubKey, MutableTransactionSignatureChecker(&mergedTx, i, amount), txin.scriptSig, txv.vin[i].scriptSig);
 
         // Nothing we are capable of signing can be more than the original 201 ops so using it is fine.
         if (!VerifyScript(txin.scriptSig, prevPubKey, STANDARD_SCRIPT_VERIFY_FLAGS, MAX_OPS_PER_SCRIPT,
