@@ -1018,22 +1018,19 @@ void RandAddSeedPerfmon()
 
 // Implement in Android by calling into the java SecureRandom implementation.
 // You must provide this Java API
-void GetRandBytes(unsigned char *buf, int num)
+void RandomBytes(unsigned char *buf, int num)
 {
     jbyteArray bArray = javaEnv->NewByteArray(num);
     javaEnv->CallStaticVoidMethod(secRandomClass, secRandom, bArray);
     javaEnv->GetByteArrayRegion(bArray, 0, num, (jbyte *)buf);
     javaEnv->DeleteLocalRef(bArray);
 }
+#define JAVA_ANDROID
+
+#endif
 #endif
 
-extern "C" int RandomBytes(unsigned char *buf, int num)
-{
-    GetRandBytes(buf, num);
-    return num;
-}
-
-#else
+#ifndef JAVA_ANDROID
 /** Return random bytes from cryptographically acceptable random sources */
 extern "C" int RandomBytes(unsigned char *buf, int num)
 {
