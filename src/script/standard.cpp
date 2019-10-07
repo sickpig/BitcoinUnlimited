@@ -122,6 +122,12 @@ bool Solver(const CScript &scriptPubKey, txnouttype &typeRet, vector<vector<unsi
             {
                 while (CPubKey::ValidSize(vch1))
                 {
+                    // In case of a multisig txns since we're adopting SCRIPT_VERIFY_MINIMALDATA as a hard
+                    // consensus rule, it doesn't make sense to allow "spendable" but actually unspendable
+                    // as standard.
+                    if (opcode1 < 0 || opcode1 > OP_PUSHDATA4 || !CheckMinimalPush(vch1, opcode1))
+                        return false;
+
                     vSolutionsRet.push_back(vch1);
                     if (!script1.GetOp(pc1, opcode1, vch1))
                         break;
