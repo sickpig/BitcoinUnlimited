@@ -92,7 +92,7 @@ static bool MatchLabelPublic(const CScript &script, std::vector<valtype> &dataCa
 {
     // LabelPublc OP_RETURN data size format small
     // Template: "CScript() << OP_RETURN << OP_BIGINTEGER << OP_DATA"
-    // data deve contenere il OP_DATA
+
     if (script.size() < 1 || script[0] != OP_RETURN || !script.IsPushOnly(script.begin() + 1))
     {
         return false;
