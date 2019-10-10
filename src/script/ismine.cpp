@@ -124,6 +124,7 @@ isminetype IsMine(const CKeyStore &keystore, const CScript &scriptPubKey, CBlock
         if (keystore.GetCScript(scriptID, subscript))
         {
             isminetype ret = IsMine(keystore, subscript, bestBlock);
+            // FIXME do not always log, use a  specific debug category or create one if no others fit
             LOGA("Freeze SUBSCRIPT = %s! **** MINE=%d  *****  \n", ::ScriptToAsmStr(subscript), ret);
             // if (ret == ISMINE_SPENDABLE) TODO Don't understand why this line was required. Had to comment it so all
             // minetypes in subscripts (eg CLTV) are recognizable
@@ -150,6 +151,7 @@ isminetype IsMine(const CKeyStore &keystore, const CScript &scriptPubKey, CBlock
         {
             CScriptNum nFreezeLockTime(vSolutions[0], true, 5);
 
+            // FIXME do not always log, use a  specific debug category or create one if no others fit
             LOGA("Found Freeze Have Key. nFreezeLockTime=%d. BestBlockHeight=%d \n", nFreezeLockTime.getint64(),
                 bestBlock->nHeight);
             if (nFreezeLockTime < LOCKTIME_THRESHOLD)
