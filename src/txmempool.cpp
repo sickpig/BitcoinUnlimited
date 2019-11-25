@@ -246,6 +246,7 @@ bool CTxMemPool::_CalculateMemPoolAncestors(const CTxMemPoolEntry &entry,
                 parentHashes.insert(piter);
                 if (parentHashes.size() + 1 > limitAncestorCount)
                 {
+                    LOG(MEMPOOL, "too many unconfirmed parents: %u [limit: %u]", parentHashes.size(), limitAncestorCount);
                     errString = strprintf(
                         "too many unconfirmed parents: %u [limit: %u]", parentHashes.size(), limitAncestorCount);
                     return false;
