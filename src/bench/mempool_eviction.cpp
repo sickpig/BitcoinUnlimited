@@ -4,6 +4,7 @@
 
 #include "bench.h"
 #include "policy/policy.h"
+#include "test/test_bitcoin.h"
 #include "txmempool.h"
 
 #include <list>
@@ -26,6 +27,8 @@ static void AddTx(const CTransactionRef &tx, const CAmount &nFee, CTxMemPool &po
 // unique transactions for a more meaningful performance measurement.
 static void MempoolEviction(benchmark::State &state)
 {
+    BasicTestingSetup test_setup;
+
     CMutableTransaction tx1 = CMutableTransaction();
     tx1.vin.resize(1);
     tx1.vin[0].scriptSig = CScript() << OP_1;

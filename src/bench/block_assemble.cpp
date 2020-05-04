@@ -5,15 +5,18 @@
 #include <bench/bench.h>
 #include <chainparams.h>
 #include <coins.h>
+#include <consensus/consensus.h>
 #include <consensus/merkle.h>
 #include <consensus/validation.h>
+#include <init.h>
 #include <miner.h>
 #include <policy/policy.h>
-#include <scheduler.h>
+#include <pow.h>
+#include <test/test_bitcoin.h>
 #include <txdb.h>
 #include <txmempool.h>
-#include <utiltime.h>
-#include <validation.h>
+#include <txadmission.h>
+#include <validation/validation.h>
 #include <validationinterface.h>
 
 #include <boost/thread.hpp>
@@ -21,30 +24,31 @@
 #include <list>
 #include <vector>
 
-static std::shared_ptr<CBlock> PrepareBlock(const CScript& coinbase_scriptPubKey)
+static CBlock* PrepareBlock(const CScript& coinbase_scriptPubKey, const CChainParams &chainparams)
 {
-    auto block = std::make_shared<CBlock>(
-        BlockAssembler{Params()}
-            .CreateNewBlock(coinbase_scriptPubKey, /* fMineWitnessTx */ true)
-            ->block);
+    std::unique_ptr<CBlockTemplate> pblocktemplate(new CBlockTemplate());
+    pblocktemplate = BlockAssembler(chainparams).CreateNewBlock(coinbase_scriptPubKey);
+    CBlock &block = pblocktemplate->block;
 
-    block->nTime = ::chainActive.Tip()->GetMedianTimePast() + 1;
-    block->hashMerkleRoot = BlockMerkleRoot(*block);
-
-    return block;
+    return &block;
 }
 
 
-static CTxIn MineBlock(const CScript& coinbase_scriptPubKey)
+static CTxIn MineBlock(const CScript& coinbase_scriptPubKey, const CChainParams &chainparams)
 {
-    auto block = PrepareBlock(coinbase_scriptPubKey);
+    auto block = PrepareBlock(coinbase_scriptPubKey, chainparams);
 
-    while (!CheckProofOfWork(block->GetHash(), block->nBits, Params().GetConsensus())) {
-        assert(++block->nNonce);
+    block->nTime = chainActive.Tip()->GetMedianTimePast() + 1;
+    block->hashMerkleRoot = BlockMerkleRoot(*block);
+    while (!CheckProofOfWork(block->GetHash(), block->nBits, chainparams.GetConsensus())) {
+        ++block->nNonce;
+        assert(block->nNonce);
     }
 
-    bool processed{ProcessNewBlock(Params(), block, true, nullptr)};
+    CValidationState state;
+    bool processed = ProcessNewBlock(state, chainparams, nullptr, block, true, nullptr, false);
     assert(processed);
+    assert(state.IsValid());
 
     return CTxIn{block->vtx[0]->GetHash(), 0};
 }
@@ -52,64 +56,54 @@ static CTxIn MineBlock(const CScript& coinbase_scriptPubKey)
 
 static void AssembleBlock(benchmark::State& state)
 {
-    const std::vector<unsigned char> op_true{OP_TRUE};
-    CScriptWitness witness;
-    witness.stack.push_back(op_true);
+    TestingSetup test_setup(CBaseChainParams::REGTEST);
+    const CChainParams &chainparams = Params(CBaseChainParams::REGTEST);
+    fPrintToConsole = true;
+    CKey coinbaseKey;
 
-    uint256 witness_program;
-    CSHA256().Write(&op_true[0], op_true.size()).Finalize(witness_program.begin());
+    coinbaseKey.MakeNewKey(true);
+    const CScript SCRIPT_PUB = CScript() <<  ToByteVector(coinbaseKey.GetPubKey()) << OP_CHECKSIG;
 
-    const CScript SCRIPT_PUB{CScript(OP_0) << std::vector<unsigned char>{witness_program.begin(), witness_program.end()}};
+    //const CScript redeemScript = CScript() << OP_DROP << OP_TRUE;
+    //const CScript SCRIPT_PUB =
+    //    CScript() << OP_HASH160 << ToByteVector(CScriptID(redeemScript))
+    //              << OP_EQUAL;
 
-    // Switch to regtest so we can mine faster
-    // Also segwit is active, so we can include witness transactions
-    SelectParams(CBaseChainParams::REGTEST);
+    //const CScript scriptSig = CScript() << std::vector<uint8_t>(100, 0xff) << ToByteVector(redeemScript);
 
-    InitScriptExecutionCache();
-
-    boost::thread_group thread_group;
-    CScheduler scheduler;
-    {
-        ::pblocktree.reset(new CBlockTreeDB(1 << 20, true));
-        ::pcoinsdbview.reset(new CCoinsViewDB(1 << 23, true));
-        ::pcoinsTip.reset(new CCoinsViewCache(pcoinsdbview.get()));
-
-        const CChainParams& chainparams = Params();
-        thread_group.create_thread(boost::bind(&CScheduler::serviceQueue, &scheduler));
-        GetMainSignals().RegisterBackgroundSignalScheduler(scheduler);
-        LoadGenesisBlock(chainparams);
-        CValidationState state;
-        ActivateBestChain(state, chainparams);
-        assert(::chainActive.Tip() != nullptr);
-        const bool witness_enabled{IsWitnessEnabled(::chainActive.Tip(), chainparams.GetConsensus())};
-        assert(witness_enabled);
-    }
-
-    // Collect some loose transactions that spend the coinbases of our mined blocks
+    // Collect some loose transactions that spend the coinbases of our mined
+    // blocks
     constexpr size_t NUM_BLOCKS{200};
     std::array<CTransactionRef, NUM_BLOCKS - COINBASE_MATURITY + 1> txs;
-    for (size_t b{0}; b < NUM_BLOCKS; ++b) {
+    for (size_t b = 0; b < NUM_BLOCKS; ++b) {
         CMutableTransaction tx;
-        tx.vin.push_back(MineBlock(SCRIPT_PUB));
-        tx.vin.back().scriptWitness = witness;
+        tx.vin.push_back(MineBlock(SCRIPT_PUB, chainparams));
+        //tx.vin.back().scriptSig = scriptSig;
         tx.vout.emplace_back(1337, SCRIPT_PUB);
-        if (NUM_BLOCKS - b >= COINBASE_MATURITY)
+        if (NUM_BLOCKS - b >= COINBASE_MATURITY) {
             txs.at(b) = MakeTransactionRef(tx);
+        }
     }
-    for (const auto& txr : txs) {
-        CValidationState state;
-        bool ret{::AcceptToMemoryPool(::mempool, state, txr, nullptr /* pfMissingInputs */, nullptr /* plTxnReplaced */, false /* bypass_limits */, /* nAbsurdFee */ 0)};
-        assert(ret);
+
+    {
+        // Required for ::AcceptToMemoryPool.
+        LOCK(cs_main);
+
+        for (const auto &txr : txs) {
+            CValidationState vstate;
+            bool ret{AcceptToMemoryPool(mempool, vstate, txr,
+                                         false, /* fLimitFree */
+                                         nullptr /* pfMissingInputs */,
+                                         false, /* fOverrideMempoolLimit */
+                                         true, /* fRejectAbsurdFee */
+                                         TransactionClass::DEFAULT)};
+            assert(ret);
+        }
     }
 
     while (state.KeepRunning()) {
-        PrepareBlock(SCRIPT_PUB);
+        PrepareBlock(SCRIPT_PUB, chainparams);
     }
-
-    thread_group.interrupt_all();
-    thread_group.join_all();
-    GetMainSignals().FlushBackgroundCallbacks();
-    GetMainSignals().UnregisterBackgroundSignalScheduler();
 }
 
 BENCHMARK(AssembleBlock, 700);
