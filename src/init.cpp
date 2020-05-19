@@ -543,6 +543,8 @@ void ThreadImport(std::vector<fs::path> vImportFiles, uint64_t nTxIndexCache)
         if (fReconsider)
         {
             UniValue obj(UniValue::VARR);
+            // assume that we need to rollback more than 100 blocks
+            obj.push_back(true);
             reconsidermostworkchain(obj, false);
         }
     }
