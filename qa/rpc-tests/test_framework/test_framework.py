@@ -100,8 +100,8 @@ class BitcoinTestFramework(object):
             self.sync_all()
             return
 
-        if self.num_nodes != 4:
-            raise Exception("Default setup_network for %d nodes NYI" % self.num_nodes)
+        # if self.num_nodes != 4:
+        #     raise Exception("Default setup_network for %d nodes NYI" % self.num_nodes)
 
         # Connect the nodes as a "chain".  This allows us
         # to split the network between nodes 1 and 2 to get

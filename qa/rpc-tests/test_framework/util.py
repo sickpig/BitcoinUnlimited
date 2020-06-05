@@ -44,7 +44,7 @@ BTC = 100000000
 mBTC = 100000
 uBTC = 100
 # The maximum number of nodes a single test can spawn
-MAX_NODES = 8
+MAX_NODES = 36
 # Don't assign rpc or p2p ports lower than this
 PORT_MIN = 5000
 # The number of ports to "reserve" for p2p and rpc, each
