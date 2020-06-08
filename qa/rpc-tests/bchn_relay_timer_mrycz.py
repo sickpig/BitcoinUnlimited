@@ -43,7 +43,9 @@ class TransactionRelayTimer(BitcoinTestFramework):
             port = base_port + i
             self.extra_args.append([
                 "-zmqpubhashtx={}".format('{}:{}'.format(self._zmq_address_prefix, port)),
-                "-maxmempool=81"
+                "-maxmempool=81",
+                "-net.txAdmissionThreads=1",
+                "-net.msgHandlerThreads=1"
             ])
             self._zmq_ports.append(port)
 
@@ -251,7 +253,10 @@ class TransactionRelayTimer(BitcoinTestFramework):
             # send a random tx. Our slave_thread will receive notifications and mark the
             # timestamps of the tx's it receives.
             node = randrange(self.num_nodes - 1)
-            self.relay_transaction(node)
+            try:
+                self.relay_transaction(node)
+            except Exception as e:
+                print("Error on relay txs: %s" % (str(e)));
             # sleep for some milliseconds
             time.sleep(randrange(300, 350) / 1000)
 
