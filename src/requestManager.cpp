@@ -1474,9 +1474,11 @@ void CRequestManager::DisconnectOnDownloadTimeout(CNode *pnode, const Consensus:
     if (!pnode->fDisconnect && mapRequestManagerNodeState[nodeid].vBlocksInFlight.size() > 0)
     {
         if (nNow >
-            mapRequestManagerNodeState[nodeid].nDownloadingSince +
-                consensusParams.nPowTargetSpacing * (BLOCK_DOWNLOAD_TIMEOUT_BASE + BLOCK_DOWNLOAD_TIMEOUT_PER_PEER))
+            (mapRequestManagerNodeState[nodeid].nDownloadingSince +
+                (consensusParams.nPowTargetSpacing * (BLOCK_DOWNLOAD_TIMEOUT_BASE + BLOCK_DOWNLOAD_TIMEOUT_PER_PEER))))
         {
+            LOGA("nNow: %d - nDownloadingSince %d\n", nNow, mapRequestManagerNodeState[nodeid].nDownloadingSince);
+            LOGA("Number of blocks in flight: %d\n", mapRequestManagerNodeState[nodeid].vBlocksInFlight.size());
             LOGA("Timeout downloading block %s from peer %s, disconnecting\n",
                 mapRequestManagerNodeState[nodeid].vBlocksInFlight.front().hash.ToString(), pnode->GetLogName());
             pnode->fDisconnect = true;

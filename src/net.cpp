@@ -140,7 +140,7 @@ extern CCriticalSection cs_vUseDNSSeeds;
 
 extern CSemaphore *semOutbound;
 extern CSemaphore *semOutboundAddNode; // BU: separate semaphore for -addnodes
-std::condition_variable messageHandlerCondition;
+boost::condition_variable messageHandlerCondition;
 
 // BU  Connection Slot mitigation - used to determine how many connection attempts over time
 extern std::map<CNetAddr, ConnectionHistory> mapInboundConnectionTracker;
@@ -2041,7 +2041,7 @@ void ThreadOpenConnections()
     {
         ProcessOneShot();
 
-        MilliSleep(500);
+        MilliSleep(250);
 
         // Only connect out to one peer per network group (/16 for IPv4).
         // Do this here so we don't have to critsect vNodes inside mapAddresses critsect.
@@ -2112,7 +2112,7 @@ void ThreadOpenConnections()
         {
             while (true)
             {
-                MilliSleep(500);
+                MilliSleep(250);
                 {
                     LOCK(cs_vNodes);
                     if (find(vNodes.begin(), vNodes.end(), pNonXthinNode) == vNodes.end() ||
@@ -2140,7 +2140,7 @@ void ThreadOpenConnections()
             // to check again whether we should disconnect any nodes.  We don't have to check this too often
             // as this is most relevant during IBD.
             for (auto j = 0; (j < 120) && (shutdown_threads.load() == false); j++)
-                MilliSleep(500);
+                MilliSleep(250);
             continue;
         }
         if (shutdown_threads.load() == true)
@@ -2268,7 +2268,7 @@ void ThreadOpenAddedConnections()
     //     to be possible, when it should not be.
     for (int j = 0; j < 30; j++)
     {
-        MilliSleep(500);
+        MilliSleep(250);
         if (shutdown_threads.load() == true)
             return;
     }
@@ -2306,13 +2306,13 @@ void ThreadOpenAddedConnections()
                 //     nodes that have restarted.
                 CSemaphoreGrant grant(*semOutboundAddNode);
                 OpenNetworkConnection(addr, false, &grant, strAddNode.c_str());
-                MilliSleep(500);
+                MilliSleep(250);
             }
             // Retry every 15 seconds.  It is important to check often to make sure the Xpedited Relay network
             // nodes reconnect quickly after the remote peers restart
             for (int j = 0; j < 30; j++)
             {
-                MilliSleep(500);
+                MilliSleep(250);
                 if (shutdown_threads.load() == true)
                     return;
             }
@@ -2373,7 +2373,7 @@ void ThreadOpenAddedConnections()
             //     nodes that have restarted.
             CSemaphoreGrant grant(*semOutboundAddNode);
             OpenNetworkConnection(CAddress(vserv[i % vserv.size()]), false, &grant);
-            MilliSleep(500);
+            MilliSleep(250);
         }
         if (shutdown_threads.load() == true)
         {
@@ -2383,7 +2383,7 @@ void ThreadOpenAddedConnections()
         // nodes reconnect quickly after the remote peers restart
         for (int j = 0; j < 30; j++)
         {
-            MilliSleep(500);
+            MilliSleep(250);
             if (shutdown_threads.load() == true)
                 return;
         }
@@ -2467,8 +2467,8 @@ static bool threadProcessMessages(CNode *pnode)
 
 void ThreadMessageHandler()
 {
-    std::mutex condition_mutex;
-    std::unique_lock<std::mutex> lock(condition_mutex);
+    boost::mutex condition_mutex;
+    boost::unique_lock<boost::mutex> lock(condition_mutex);
 
     while (shutdown_threads.load() == false)
     {
@@ -2586,7 +2586,8 @@ void ThreadMessageHandler()
 
         if (fSleep)
         {
-            messageHandlerCondition.wait_until( lock, std::chrono::steady_clock::now() + std::chrono::milliseconds(10));
+            messageHandlerCondition.timed_wait(
+                lock, boost::posix_time::microsec_clock::universal_time() + boost::posix_time::milliseconds(50));
         }
     }
 }

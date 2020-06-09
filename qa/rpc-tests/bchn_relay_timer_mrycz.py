@@ -35,7 +35,7 @@ class TransactionRelayTimer(BitcoinTestFramework):
         self.setup_clean_chain = True
         self._zmq_address_prefix = "tcp://127.0.0.1"
         self._zmq_ports = []
-        self.num_nodes = 25
+        self.num_nodes = 15
         self.extra_args = []
         base_port = randrange(28900, 40000)  # we hope and pray this is unique!
         for i in range(self.num_nodes):
@@ -44,6 +44,7 @@ class TransactionRelayTimer(BitcoinTestFramework):
             self.extra_args.append([
                 "-zmqpubhashtx={}".format('{}:{}'.format(self._zmq_address_prefix, port)),
                 "-maxmempool=81",
+                "-blkretryinterval=60000000",
                 "-net.txAdmissionThreads=1",
                 "-net.msgHandlerThreads=1"
             ])
@@ -151,9 +152,10 @@ class TransactionRelayTimer(BitcoinTestFramework):
     # or to a random node if not provided
     # and poll the last node until it is recieved
     # Returns the starting node and the
-    def relay_transaction(self, node):
+    def relay_transaction(self, node, addr):
         assert self.num_nodes > 1
-        self.nodes[node].sendtoaddress(self.nodes[1].getnewaddress(), "0.00001", "", "", False)
+        # TODO create a txs and send it via enqueuetransaction w/o going through
+        self.nodes[node].sendtoaddress(addr, "0.00001", "", "", False)
 
     def run_test(self):
         import asyncio
@@ -247,14 +249,16 @@ class TransactionRelayTimer(BitcoinTestFramework):
                 raise RuntimeError("Timeout waiting for slave thread")
             num_ready += 1
 
+        # do we mind to send to the same address? nope
+        addr = self.nodes[1].getnewaddress()
         # generate a whole lot of transactions at (kinda) random intervals
         # totaling num_nodes*100 transactions over X seconds
-        for i in range(self.num_nodes * 100):
+        for i in range(self.num_nodes * 300):
             # send a random tx. Our slave_thread will receive notifications and mark the
             # timestamps of the tx's it receives.
             node = randrange(self.num_nodes - 1)
             try:
-                self.relay_transaction(node)
+                self.relay_transaction(node, addr)
             except Exception as e:
                 print("Error on relay txs: %s" % (str(e)));
             # sleep for some milliseconds
